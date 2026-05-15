@@ -1,0 +1,2266 @@
+<!DOCTYPE html>
+<html lang="lo">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>Restaurant Ordering System - ລະບົບສັ່ງອາຫານ</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Lao:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        :root {
+            --primary: #e67e22;
+            --primary-dark: #d35400;
+            --primary-light: #fdebd0;
+            --success: #27ae60;
+            --success-light: #d5f5e3;
+            --warning: #f39c12;
+            --warning-light: #fef9e7;
+            --danger: #e74c3c;
+            --danger-light: #fadbd8;
+            --info: #3498db;
+            --info-light: #d6eaf8;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-200: #e5e7eb;
+            --gray-300: #d1d5db;
+            --gray-400: #9ca3af;
+            --gray-500: #6b7280;
+            --gray-600: #4b5563;
+            --gray-700: #374151;
+            --gray-800: #1f2937;
+            --white: #ffffff;
+            --border-radius: 12px;
+            --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1);
+            --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+            --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+        }
+
+        body {
+            font-family: 'Noto Sans Lao', sans-serif;
+            background: var(--gray-100);
+            color: var(--gray-800);
+            font-size: 14px;
+        }
+
+        /* Login Styles */
+        .login-container {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            padding: 20px;
+        }
+
+        .login-box {
+            background: var(--white);
+            border-radius: 16px;
+            box-shadow: var(--shadow-lg);
+            width: 100%;
+            max-width: 420px;
+            padding: 40px;
+            animation: slideUp 0.5s ease;
+        }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(30px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .login-header { text-align: center; margin-bottom: 32px; }
+        .login-header .logo {
+            width: 80px;
+            height: 80px;
+            background: var(--primary-light);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 16px;
+        }
+        .login-header .logo i { font-size: 36px; color: var(--primary); }
+        .login-header h1 { font-size: 1.25rem; font-weight: 700; margin-bottom: 4px; }
+
+        .login-form .form-group { margin-bottom: 20px; }
+        .login-form label { display: block; font-weight: 500; margin-bottom: 6px; font-size: 0.875rem; }
+        .login-form input, .login-form select {
+            width: 100%;
+            padding: 12px 14px;
+            border: 2px solid var(--gray-200);
+            border-radius: var(--border-radius);
+            font-family: inherit;
+            font-size: 0.9375rem;
+        }
+        .login-form input:focus, .login-form select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px var(--primary-light);
+        }
+
+        .btn-login {
+            width: 100%;
+            padding: 14px;
+            background: var(--primary);
+            color: var(--white);
+            border: none;
+            border-radius: var(--border-radius);
+            font-family: inherit;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        .btn-login:hover { background: var(--primary-dark); }
+
+        /* App Container */
+        .app-container { display: flex; min-height: 100vh; }
+        
+        /* Sidebar */
+        .sidebar {
+            width: 260px;
+            background: var(--white);
+            border-right: 1px solid var(--gray-200);
+            display: flex;
+            flex-direction: column;
+            position: fixed;
+            height: 100vh;
+            z-index: 100;
+        }
+        
+        .sidebar-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--gray-200);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            height: 60px;
+        }
+        .logo-small {
+            width: 36px;
+            height: 36px;
+            background: var(--primary-light);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .logo-small i { color: var(--primary); font-size: 1.125rem; }
+        .brand-name { font-weight: 700; font-size: 1.125rem; }
+        
+        .sidebar-nav { flex: 1; padding: 16px 12px; overflow-y: auto; }
+        .sidebar-nav ul { list-style: none; }
+        .sidebar-nav li { margin-bottom: 4px; }
+        .sidebar-nav a {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            border-radius: var(--border-radius);
+            color: var(--gray-600);
+            text-decoration: none;
+            font-size: 0.9375rem;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        .sidebar-nav a:hover { background: var(--gray-100); color: var(--primary); }
+        .sidebar-nav a.active { background: var(--primary-light); color: var(--primary); }
+        
+        .sidebar-footer {
+            padding: 16px;
+            border-top: 1px solid var(--gray-200);
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        .user-avatar {
+            width: 36px;
+            height: 36px;
+            background: var(--primary-light);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .user-name { font-weight: 600; font-size: 0.875rem; }
+        .user-role { font-size: 0.75rem; color: var(--gray-500); }
+        
+        .btn-logout {
+            width: 100%;
+            padding: 10px;
+            background: var(--danger-light);
+            color: var(--danger);
+            border: none;
+            border-radius: var(--border-radius);
+            font-family: inherit;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+        .btn-logout:hover { background: var(--danger); color: var(--white); }
+        
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            margin-left: 260px;
+            min-height: 100vh;
+        }
+        
+        .top-bar {
+            height: 60px;
+            background: var(--white);
+            border-bottom: 1px solid var(--gray-200);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+        .page-title h2 { font-size: 1.25rem; font-weight: 600; }
+        .top-actions { display: flex; align-items: center; gap: 16px; }
+        .current-time { font-size: 0.875rem; color: var(--gray-500); }
+        
+        .content-area { padding: 24px; }
+
+        /* Dashboard Stats */
+        .dashboard-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+        .stat-card {
+            background: var(--white);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: var(--shadow);
+            border-left: 4px solid var(--primary);
+        }
+        .stat-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+        .stat-label { font-size: 0.875rem; color: var(--gray-500); }
+        .stat-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--primary-light);
+            color: var(--primary);
+        }
+        .stat-value { font-size: 1.75rem; font-weight: 700; }
+
+        /* Table Styles */
+        .data-table-container {
+            background: var(--white);
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+            overflow-x: auto;
+        }
+        .table-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--gray-200);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .table-title { font-size: 1rem; font-weight: 600; }
+        .table-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+        
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 500px;
+        }
+        .data-table th, .data-table td {
+            padding: 12px 16px;
+            text-align: left;
+            font-size: 0.875rem;
+            border-bottom: 1px solid var(--gray-200);
+        }
+        .data-table th {
+            background: var(--gray-100);
+            font-weight: 600;
+        }
+        .data-table tbody tr:hover { background: var(--gray-50); }
+
+        /* Status Badges */
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .status-pending { background: var(--warning-light); color: var(--warning); }
+        .status-confirmed { background: var(--info-light); color: var(--info); }
+        .status-cooking { background: var(--primary-light); color: var(--primary); }
+        .status-completed { background: var(--success-light); color: var(--success); }
+        .status-paid { background: var(--success-light); color: var(--success); }
+        .status-cancelled { background: var(--danger-light); color: var(--danger); }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            border-radius: var(--border-radius);
+            font-family: inherit;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+        }
+        .btn-primary { background: var(--primary); color: var(--white); }
+        .btn-primary:hover { background: var(--primary-dark); }
+        .btn-success { background: var(--success); color: var(--white); }
+        .btn-danger { background: var(--danger); color: var(--white); }
+        .btn-secondary { background: var(--gray-300); color: var(--gray-700); }
+        .btn-outline { background: transparent; border: 1px solid var(--gray-400); }
+        .btn-sm { padding: 4px 12px; font-size: 0.75rem; }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .modal.show { display: flex; }
+        .modal-content {
+            background: var(--white);
+            border-radius: 12px;
+            width: 100%;
+            max-width: 600px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        .modal-content.modal-lg { max-width: 900px; }
+        .modal-header {
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--gray-200);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            background: white;
+        }
+        .modal-header h3 { font-size: 1.125rem; font-weight: 600; }
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: var(--gray-400);
+        }
+        .modal-body { padding: 24px; }
+        .modal-footer {
+            padding: 16px 24px;
+            border-top: 1px solid var(--gray-200);
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+
+        /* Form */
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-weight: 500; margin-bottom: 6px; font-size: 0.875rem; }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--gray-300);
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 0.875rem;
+        }
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        /* Menu Items Grid */
+        .menu-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 16px;
+            margin-top: 16px;
+        }
+        .menu-card {
+            background: var(--white);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: var(--shadow);
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .menu-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+        .menu-image {
+            height: 160px;
+            background: var(--gray-200);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3rem;
+        }
+        .menu-info { padding: 12px; }
+        .menu-name { font-weight: 600; font-size: 1rem; margin-bottom: 4px; }
+        .menu-price { color: var(--primary); font-weight: 600; }
+        .menu-description { font-size: 0.75rem; color: var(--gray-500); margin-top: 4px; }
+
+        /* Cart Sidebar */
+        .cart-sidebar {
+            position: fixed;
+            right: 0;
+            top: 0;
+            width: 380px;
+            height: 100vh;
+            background: var(--white);
+            box-shadow: -2px 0 8px rgba(0,0,0,0.1);
+            z-index: 200;
+            display: flex;
+            flex-direction: column;
+            transform: translateX(100%);
+            transition: transform 0.3s ease;
+        }
+        .cart-sidebar.open { transform: translateX(0); }
+        .cart-header {
+            padding: 16px;
+            border-bottom: 1px solid var(--gray-200);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .cart-items { flex: 1; overflow-y: auto; padding: 16px; }
+        .cart-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--gray-200);
+        }
+        .cart-item-info { flex: 1; }
+        .cart-item-name { font-weight: 500; }
+        .cart-item-price { font-size: 0.75rem; color: var(--gray-500); }
+        .cart-item-qty { display: flex; align-items: center; gap: 8px; }
+        .qty-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            border: 1px solid var(--gray-300);
+            background: white;
+            cursor: pointer;
+        }
+        .cart-footer {
+            padding: 16px;
+            border-top: 1px solid var(--gray-200);
+        }
+        .cart-total {
+            display: flex;
+            justify-content: space-between;
+            font-weight: 700;
+            font-size: 1.125rem;
+            margin-bottom: 16px;
+        }
+
+        /* Table Grid */
+        .table-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+            gap: 16px;
+            margin-top: 16px;
+        }
+        .table-card {
+            background: var(--white);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            box-shadow: var(--shadow);
+            transition: all 0.2s;
+        }
+        .table-card:hover { transform: translateY(-2px); }
+        .table-card.occupied { background: var(--danger-light); border-color: var(--danger); }
+        .table-card.selected { background: var(--primary-light); border: 2px solid var(--primary); }
+        .table-number { font-size: 1.5rem; font-weight: 700; }
+        .table-status { font-size: 0.7rem; margin-top: 4px; }
+
+        /* KDS Styles */
+        .kds-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 20px;
+        }
+        .kds-order-card {
+            background: var(--white);
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: var(--shadow);
+            border-left: 4px solid var(--warning);
+        }
+        .kds-order-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--gray-200);
+        }
+        .kds-items { margin: 12px 0; }
+        .kds-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px dotted var(--gray-200);
+        }
+        .timer { font-size: 0.75rem; color: var(--gray-500); }
+
+        /* Customer Web App */
+        .customer-header {
+            background: var(--primary);
+            color: white;
+            padding: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .cart-icon {
+            position: relative;
+            cursor: pointer;
+        }
+        .cart-badge {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            background: var(--danger);
+            color: white;
+            border-radius: 50%;
+            width: 18px;
+            height: 18px;
+            font-size: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .category-tabs {
+            display: flex;
+            overflow-x: auto;
+            gap: 8px;
+            padding: 12px;
+            background: var(--white);
+            border-bottom: 1px solid var(--gray-200);
+            position: sticky;
+            top: 60px;
+        }
+        .category-tab {
+            padding: 8px 16px;
+            border-radius: 20px;
+            background: var(--gray-100);
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .category-tab.active {
+            background: var(--primary);
+            color: white;
+        }
+
+        /* Toast */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+        }
+        .toast {
+            background: var(--white);
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 8px;
+            box-shadow: var(--shadow-lg);
+            border-left: 4px solid var(--primary);
+            animation: slideIn 0.3s ease;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+        }
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid var(--gray-300);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 768px) {
+            .sidebar { transform: translateX(-100%); position: fixed; }
+            .sidebar.open { transform: translateX(0); }
+            .main-content { margin-left: 0; }
+            .cart-sidebar { width: 100%; }
+            .form-row { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Login Page -->
+    <div id="login-page" class="login-container">
+        <div class="login-box">
+            <div class="login-header">
+                <div class="logo"><i class="fas fa-utensils"></i></div>
+                <h1>ລະບົບສັ່ງອາຫານຮ້ານອາຫານ</h1>
+                <p class="subtitle">Restaurant Ordering System</p>
+            </div>
+            <div class="login-form">
+                <div class="form-group">
+                    <label><i class="fas fa-envelope"></i> ອີເມວ</label>
+                    <input type="email" id="email" placeholder="cashier@test.com" required>
+                </div>
+                <div class="form-group">
+                    <label><i class="fas fa-lock"></i> ລະຫັດຜ່ານ</label>
+                    <input type="password" id="password" placeholder="123456" required>
+                </div>
+                <div class="form-group">
+                    <label><i class="fas fa-user-tag"></i> ຕຳແໜ່ງ</label>
+                    <select id="role" required>
+                        <option value="">ເລືອກຕຳແໜ່ງ</option>
+                        <option value="cashier">ພະນັກງານເງິນ (Cashier)</option>
+                        <option value="kitchen">ພໍ່ຄົວ (Kitchen)</option>
+                        <option value="waiter">ພະນັກງານບໍລິການ (Waiter)</option>
+                        <option value="admin">ຜູ້ບໍລິຫານ (Admin)</option>
+                    </select>
+                </div>
+                <button id="login-btn" class="btn-login">
+                    <i class="fas fa-sign-in-alt"></i> ເຂົ້າສູ່ລະບົບ
+                </button>
+                <div id="login-error" class="error-message" style="display:none; color:var(--danger); margin-top:12px;"></div>
+            </div>
+            <div class="login-footer" style="text-align:center; margin-top:24px; font-size:0.75rem; color:var(--gray-400);">
+                <p>Demo: cashier@test.com / 123456 / cashier</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App (Staff) -->
+    <div id="main-app" class="app-container" style="display: none;">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-small"><i class="fas fa-utensils"></i></div>
+                <span class="brand-name">ເມນູອາຫານ</span>
+            </div>
+            <nav class="sidebar-nav">
+                <ul id="nav-menu"></ul>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <div class="user-avatar"><i class="fas fa-user-circle"></i></div>
+                    <div class="user-details">
+                        <span id="user-name" class="user-name">User</span>
+                        <span id="user-role" class="user-role">Role</span>
+                    </div>
+                </div>
+                <button id="logout-btn" class="btn-logout">
+                    <i class="fas fa-sign-out-alt"></i> ອອກຈາກລະບົບ
+                </button>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="top-bar">
+                <div class="page-title">
+                    <h2 id="page-title">ໜ້າຫຼັກ</h2>
+                </div>
+                <div class="top-actions">
+                    <div class="current-time" id="current-time"></div>
+                </div>
+            </header>
+            <div id="content-area" class="content-area">
+                <div class="data-table-container">
+                    <div class="empty-state" style="text-align:center; padding:60px;">
+                        <i class="fas fa-spinner fa-pulse fa-2x"></i>
+                        <p>ກຳລັງໂຫລດ...</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Customer Web App Container -->
+    <div id="customer-app" style="display: none;">
+        <div class="customer-header">
+            <i class="fas fa-utensils fa-lg"></i>
+            <div style="text-align:center;">
+                <div id="customer-table-info">ໂຕະ: -</div>
+            </div>
+            <div class="cart-icon" id="cart-icon">
+                <i class="fas fa-shopping-cart fa-lg"></i>
+                <span id="cart-count" class="cart-badge" style="display:none;">0</span>
+            </div>
+        </div>
+        <div class="category-tabs" id="category-tabs"></div>
+        <div id="customer-content" style="padding: 12px; padding-bottom: 80px;"></div>
+        
+        <!-- Cart Sidebar -->
+        <div id="cart-sidebar" class="cart-sidebar">
+            <div class="cart-header">
+                <h3><i class="fas fa-shopping-cart"></i> ກະຕ່າຂອງຂ້ອຍ</h3>
+                <button class="close-btn" onclick="closeCart()">&times;</button>
+            </div>
+            <div class="cart-items" id="cart-items"></div>
+            <div class="cart-footer">
+                <div class="cart-total">
+                    <span>ລວມທັງໝົດ</span>
+                    <span id="cart-total-amount">0 ₭</span>
+                </div>
+                <button class="btn btn-primary" style="width:100%;" onclick="checkout()">
+                    <i class="fas fa-check-circle"></i> ຢືນຢັນການສັ່ງ
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="spinner"></div>
+    </div>
+
+    <script>
+        // ============================================
+        // CONFIGURATION
+        // ============================================
+        const SUPABASE_URL = 'https://smfusnmsdotpqnhnbynr.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNtZnVzbm1zZG90cHFuaG5ieW5yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4MzgwNzAsImV4cCI6MjA5NDQxNDA3MH0.sWHZhIAae6W1oVJ2-quRDzMowfwiefdkw8maq982FcY';
+
+        let sbClient = null;
+        let currentUser = null;
+        let currentPage = 'dashboard';
+        let currentTableId = null;
+        let currentOrderId = null;
+        let cart = [];
+        let menuItems = [];
+        let categories = [];
+        let tables = [];
+
+        // ============================================
+        // UTILITIES
+        // ============================================
+        function showLoading() { document.getElementById('loading-overlay').classList.add('show'); }
+        function hideLoading() { document.getElementById('loading-overlay').classList.remove('show'); }
+
+        function showToast(title, message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.style.borderLeftColor = type === 'success' ? 'var(--success)' : type === 'error' ? 'var(--danger)' : 'var(--warning)';
+            toast.innerHTML = `
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <i class="fas ${type === 'success' ? 'fa-check-circle' : type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle'}" style="color:${type === 'success' ? 'var(--success)' : type === 'error' ? 'var(--danger)' : 'var(--warning)'}"></i>
+                    <div><strong>${title}</strong><br><small>${message}</small></div>
+                </div>
+            `;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        function formatCurrency(amount) {
+            if (!amount && amount !== 0) return '0 ₭';
+            return new Intl.NumberFormat('lo-LA').format(amount) + ' ₭';
+        }
+
+        function formatDateTime(dateStr) {
+            if (!dateStr) return '-';
+            return new Date(dateStr).toLocaleString('lo-LA');
+        }
+
+        function getStatusLabel(status) {
+            const labels = {
+                'pending': 'ລໍຖ້າຢືນຢັນ',
+                'confirmed': 'ຢືນຢັນແລ້ວ',
+                'cooking': 'ກຳລັງເຮັດ',
+                'completed': 'ສຳເລັດ',
+                'paid': 'ຊຳລະແລ້ວ',
+                'cancelled': 'ຍົກເລີກ'
+            };
+            return labels[status] || status;
+        }
+
+        function initSupabase() {
+            if (!sbClient) sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            return sbClient;
+        }
+
+        // ============================================
+        // DATABASE OPERATIONS - CREATE TABLES FIRST
+        // ============================================
+        async function setupDatabase() {
+            showLoading();
+            try {
+                const supabase = initSupabase();
+                
+                // Create categories table
+                await supabase.rpc('exec_sql', { query: `
+                    CREATE TABLE IF NOT EXISTS categories (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        name_lo TEXT NOT NULL,
+                        name_en TEXT,
+                        icon TEXT,
+                        display_order INT DEFAULT 0,
+                        is_active BOOLEAN DEFAULT true,
+                        created_at TIMESTAMP DEFAULT NOW()
+                    );
+                `}).catch(() => console.log('Table may already exist'));
+
+                // Create menu_items table
+                await supabase.rpc('exec_sql', { query: `
+                    CREATE TABLE IF NOT EXISTS menu_items (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        category_id UUID REFERENCES categories(id),
+                        code TEXT UNIQUE,
+                        name_lo TEXT NOT NULL,
+                        name_en TEXT,
+                        description_lo TEXT,
+                        price DECIMAL(15,0) DEFAULT 0,
+                        image_url TEXT,
+                        is_available BOOLEAN DEFAULT true,
+                        is_recommended BOOLEAN DEFAULT false,
+                        preparation_time INT DEFAULT 15,
+                        created_at TIMESTAMP DEFAULT NOW()
+                    );
+                `}).catch(() => console.log('Table may already exist'));
+
+                // Create tables table
+                await supabase.rpc('exec_sql', { query: `
+                    CREATE TABLE IF NOT EXISTS restaurant_tables (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        table_number INT UNIQUE NOT NULL,
+                        qr_code TEXT,
+                        capacity INT DEFAULT 4,
+                        status TEXT DEFAULT 'available',
+                        created_at TIMESTAMP DEFAULT NOW()
+                    );
+                `}).catch(() => console.log('Table may already exist'));
+
+                // Create orders table
+                await supabase.rpc('exec_sql', { query: `
+                    CREATE TABLE IF NOT EXISTS orders (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        order_number TEXT UNIQUE,
+                        table_id UUID REFERENCES restaurant_tables(id),
+                        customer_name TEXT,
+                        customer_phone TEXT,
+                        order_type TEXT DEFAULT 'dine_in',
+                        status TEXT DEFAULT 'pending',
+                        special_instructions TEXT,
+                        total_amount DECIMAL(15,0) DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT NOW(),
+                        confirmed_at TIMESTAMP,
+                        completed_at TIMESTAMP,
+                        paid_at TIMESTAMP
+                    );
+                `}).catch(() => console.log('Table may already exist'));
+
+                // Create order_items table
+                await supabase.rpc('exec_sql', { query: `
+                    CREATE TABLE IF NOT EXISTS order_items (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        order_id UUID REFERENCES orders(id) ON DELETE CASCADE,
+                        menu_item_id UUID REFERENCES menu_items(id),
+                        menu_item_name TEXT,
+                        quantity INT DEFAULT 1,
+                        unit_price DECIMAL(15,0),
+                        subtotal DECIMAL(15,0),
+                        special_instructions TEXT,
+                        status TEXT DEFAULT 'pending',
+                        created_at TIMESTAMP DEFAULT NOW()
+                    );
+                `}).catch(() => console.log('Table may already exist'));
+
+                // Create staff table
+                await supabase.rpc('exec_sql', { query: `
+                    CREATE TABLE IF NOT EXISTS staff (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        name TEXT NOT NULL,
+                        email TEXT UNIQUE NOT NULL,
+                        phone TEXT,
+                        role TEXT NOT NULL,
+                        active BOOLEAN DEFAULT true,
+                        created_at TIMESTAMP DEFAULT NOW()
+                    );
+                `}).catch(() => console.log('Table may already exist'));
+
+                // Insert sample data if empty
+                const { data: existingCategories } = await supabase.from('categories').select('count');
+                if (!existingCategories || existingCategories.length === 0 || existingCategories[0]?.count === 0) {
+                    await supabase.from('categories').insert([
+                        { name_lo: 'ອາຫານຄົວຫຼັກ', name_en: 'Main Dishes', icon: 'fa-utensils', display_order: 1 },
+                        { name_lo: 'ເຄື່ອງດື່ມ', name_en: 'Beverages', icon: 'fa-mug-hot', display_order: 2 },
+                        { name_lo: 'ຂອງກິນລຽບ', name_en: 'Appetizers', icon: 'fa-apple-alt', display_order: 3 },
+                        { name_lo: 'ຂອງຫວານ', name_en: 'Desserts', icon: 'fa-ice-cream', display_order: 4 }
+                    ]);
+                }
+
+                const { data: existingMenu } = await supabase.from('menu_items').select('count');
+                if (!existingMenu || existingMenu.length === 0 || existingMenu[0]?.count === 0) {
+                    const { data: cats } = await supabase.from('categories').select('id, name_lo');
+                    if (cats && cats.length > 0) {
+                        await supabase.from('menu_items').insert([
+                            { category_id: cats[0].id, code: 'LP001', name_lo: 'ລາບໝູ', price: 45000, is_recommended: true },
+                            { category_id: cats[0].id, code: 'TM001', name_lo: 'ຕຳໝາກຫຸ່ງ', price: 35000, is_recommended: true },
+                            { category_id: cats[0].id, code: 'PD001', name_lo: 'ປະເພດເຕົາ', price: 55000 },
+                            { category_id: cats[1].id, code: 'BJ001', name_lo: 'ນ້ຳບົວຫຼວງ', price: 10000 },
+                            { category_id: cats[1].id, code: 'CL001', name_lo: 'ນ້ຳກ້ອນຫຼົ່ນ', price: 15000 },
+                            { category_id: cats[2].id, code: 'SK001', name_lo: 'ໄສ້ກອກປີ້ງ', price: 25000 }
+                        ]);
+                    }
+                }
+
+                const { data: existingTables } = await supabase.from('restaurant_tables').select('count');
+                if (!existingTables || existingTables.length === 0 || existingTables[0]?.count === 0) {
+                    for (let i = 1; i <= 10; i++) {
+                        await supabase.from('restaurant_tables').insert({
+                            table_number: i,
+                            capacity: i <= 6 ? 4 : 6,
+                            status: 'available'
+                        });
+                    }
+                }
+
+                const { data: existingStaff } = await supabase.from('staff').select('count');
+                if (!existingStaff || existingStaff.length === 0 || existingStaff[0]?.count === 0) {
+                    await supabase.from('staff').insert([
+                        { name: 'Cashier User', email: 'cashier@test.com', role: 'cashier', active: true },
+                        { name: 'Kitchen User', email: 'kitchen@test.com', role: 'kitchen', active: true },
+                        { name: 'Admin User', email: 'admin@test.com', role: 'admin', active: true }
+                    ]);
+                }
+
+                hideLoading();
+                showToast('ສຳເລັດ', 'ຕັ້ງຄ່າຖານຂໍ້ມູນສຳເລັດ');
+            } catch (error) {
+                hideLoading();
+                console.error('Setup error:', error);
+            }
+        }
+
+        // ============================================
+        // AUTHENTICATION
+        // ============================================
+        async function login(email, password, role) {
+            showLoading();
+            try {
+                const supabase = initSupabase();
+                const { data: staff, error } = await supabase
+                    .from('staff')
+                    .select('*')
+                    .eq('email', email)
+                    .eq('role', role)
+                    .eq('active', true);
+                
+                if (error) throw error;
+                if (!staff || staff.length === 0) throw new Error('ບໍ່ພົບຜູ້ໃຊ້');
+                if (password !== '123456') throw new Error('ລະຫັດຜ່ານບໍ່ຖືກຕ້ອງ');
+                
+                currentUser = staff[0];
+                localStorage.setItem('restaurant_user', JSON.stringify(currentUser));
+                
+                hideLoading();
+                showToast('ສຳເລັດ', `ຍິນດີຕ້ອນຮັບ, ${currentUser.name}`);
+                showMainApp();
+                return true;
+            } catch (error) {
+                hideLoading();
+                showToast('ຜິດພາດ', error.message, 'error');
+                return false;
+            }
+        }
+
+        function logout() {
+            currentUser = null;
+            localStorage.removeItem('restaurant_user');
+            document.getElementById('main-app').style.display = 'none';
+            document.getElementById('customer-app').style.display = 'none';
+            document.getElementById('login-page').style.display = 'flex';
+        }
+
+        function showMainApp() {
+            document.getElementById('login-page').style.display = 'none';
+            document.getElementById('main-app').style.display = 'flex';
+            document.getElementById('user-name').textContent = currentUser.name;
+            document.getElementById('user-role').textContent = 
+                currentUser.role === 'cashier' ? 'ພະນັກງານເງິນ' :
+                currentUser.role === 'kitchen' ? 'ພໍ່ຄົວ' :
+                currentUser.role === 'waiter' ? 'ພະນັກງານບໍລິການ' : 'ຜູ້ບໍລິຫານ';
+            buildNavigation();
+            loadDashboard();
+            updateTime();
+            setInterval(updateTime, 1000);
+            subscribeToRealtime();
+        }
+
+        function buildNavigation() {
+            const navMenu = document.getElementById('nav-menu');
+            navMenu.innerHTML = '';
+            const items = [];
+            
+            if (currentUser.role === 'cashier' || currentUser.role === 'admin') {
+                items.push({ icon: 'fa-tachometer-alt', label: 'ໜ້າຫຼັກ', page: 'dashboard' });
+                items.push({ icon: 'fa-utensils', label: 'ເມນູອາຫານ', page: 'menu' });
+                items.push({ icon: 'fa-chair', label: 'ຈັດການໂຕະ', page: 'tables' });
+                items.push({ icon: 'fa-clipboard-list', label: 'ຄຳສັ່ງ', page: 'orders' });
+                items.push({ icon: 'fa-chart-line', label: 'ລາຍງານ', page: 'reports' });
+            }
+            if (currentUser.role === 'kitchen' || currentUser.role === 'admin') {
+                items.push({ icon: 'fa-tv', label: 'KDS (ເຮືອນຄົວ)', page: 'kds' });
+            }
+            if (currentUser.role === 'admin') {
+                items.push({ icon: 'fa-users-cog', label: 'ຈັດການພະນັກງານ', page: 'staff' });
+            }
+            
+            items.forEach(item => {
+                const li = document.createElement('li');
+                const a = document.createElement('a');
+                a.innerHTML = `<i class="fas ${item.icon}"></i><span>${item.label}</span>`;
+                a.onclick = () => loadPage(item.page);
+                li.appendChild(a);
+                navMenu.appendChild(li);
+            });
+        }
+
+        async function loadPage(page) {
+            currentPage = page;
+            const titles = {
+                'dashboard': 'ໜ້າຫຼັກ',
+                'menu': 'ຈັດການເມນູອາຫານ',
+                'tables': 'ຈັດການໂຕະ',
+                'orders': 'ຄຳສັ່ງທັງໝົດ',
+                'reports': 'ລາຍງານ',
+                'kds': 'ຈໍສະແດງຜົນເຮືອນຄົວ (KDS)',
+                'staff': 'ຈັດການພະນັກງານ'
+            };
+            document.getElementById('page-title').textContent = titles[page] || 'ໜ້າຫຼັກ';
+            
+            if (page === 'dashboard') await loadDashboard();
+            else if (page === 'menu') await loadMenuManagement();
+            else if (page === 'tables') await loadTablesManagement();
+            else if (page === 'orders') await loadAllOrders();
+            else if (page === 'reports') await loadReports();
+            else if (page === 'kds') await loadKDS();
+            else if (page === 'staff') await loadStaffManagement();
+        }
+
+        function updateTime() {
+            const now = new Date();
+            document.getElementById('current-time').textContent = now.toLocaleString('lo-LA');
+        }
+
+        function subscribeToRealtime() {
+            const supabase = initSupabase();
+            supabase.channel('restaurant-updates')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+                    if (currentPage === 'dashboard') loadDashboard();
+                    if (currentPage === 'orders') loadAllOrders();
+                    if (currentPage === 'kds') loadKDS();
+                })
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, () => {
+                    if (currentPage === 'kds') loadKDS();
+                })
+                .subscribe();
+        }
+
+        // ============================================
+        // DASHBOARD
+        // ============================================
+        async function loadDashboard() {
+            const content = document.getElementById('content-area');
+            showLoading();
+            try {
+                const supabase = initSupabase();
+                const today = new Date().toISOString().split('T')[0];
+                
+                const [ordersRes, tablesRes, revenueRes] = await Promise.all([
+                    supabase.from('orders').select('*'),
+                    supabase.from('restaurant_tables').select('*'),
+                    supabase.from('orders').select('total_amount').eq('status', 'paid').gte('paid_at', today)
+                ]);
+                
+                const orders = ordersRes.data || [];
+                const tables = tablesRes.data || [];
+                const revenue = revenueRes.data?.reduce((sum, o) => sum + (o.total_amount || 0), 0) || 0;
+                
+                const pendingOrders = orders.filter(o => o.status === 'pending').length;
+                const cookingOrders = orders.filter(o => o.status === 'cooking').length;
+                const completedToday = orders.filter(o => o.status === 'paid' && o.paid_at?.startsWith(today)).length;
+                const occupiedTables = tables.filter(t => t.status === 'occupied').length;
+                
+                content.innerHTML = `
+                    <div class="dashboard-stats">
+                        <div class="stat-card"><div class="stat-header"><span class="stat-label">ຄຳສັ່ງລໍຖ້າ</span><div class="stat-icon"><i class="fas fa-clock"></i></div></div><div class="stat-value">${pendingOrders}</div></div>
+                        <div class="stat-card"><div class="stat-header"><span class="stat-label">ຄຳສັ່ງກຳລັງເຮັດ</span><div class="stat-icon"><i class="fas fa-cooking"></i></div></div><div class="stat-value">${cookingOrders}</div></div>
+                        <div class="stat-card"><div class="stat-header"><span class="stat-label">ລາຍຮັບມື້ນີ້</span><div class="stat-icon"><i class="fas fa-money-bill"></i></div></div><div class="stat-value">${formatCurrency(revenue)}</div></div>
+                        <div class="stat-card"><div class="stat-header"><span class="stat-label">ໂຕະທີ່ມີລູກຄ້າ</span><div class="stat-icon"><i class="fas fa-chair"></i></div></div><div class="stat-value">${occupiedTables}/${tables.length}</div></div>
+                    </div>
+                    <div class="data-table-container">
+                        <div class="table-header">
+                            <h3 class="table-title"><i class="fas fa-clipboard-list"></i> ຄຳສັ່ງລ້າສຸດ</h3>
+                            <button class="btn btn-primary btn-sm" onclick="showCustomerQRView()"><i class="fas fa-qrcode"></i> QR ສຳລັບລູກຄ້າ</button>
+                        </div>
+                        <div style="overflow-x:auto;">
+                            <table class="data-table">
+                                <thead><tr><th>ເລກຄຳສັ່ງ</th><th>ໂຕະ</th><th>ລູກຄ້າ</th><th>ຍອດລວມ</th><th>ສະຖານະ</th><th>ຈັດການ</th></tr></thead>
+                                <tbody>
+                                    ${orders.slice(0, 10).map(order => `
+                                        <tr>
+                                            <td><strong>${order.order_number || '-'}</strong></td>
+                                            <td>ໂຕະ ${order.table_id?.slice(-2) || '-'}</td>
+                                            <td>${order.customer_name || 'ບໍ່ລະບຸ'}</td>
+                                            <td>${formatCurrency(order.total_amount)}</td>
+                                            <td><span class="status-badge status-${order.status}">${getStatusLabel(order.status)}</span></td>
+                                            <td><button class="btn btn-outline btn-sm" onclick="viewOrderDetail('${order.id}')"><i class="fas fa-eye"></i></button></td>
+                                        </tr>
+                                    `).join('')}
+                                    ${orders.length === 0 ? '<tr><td colspan="6" style="text-align:center">ບໍ່ມີຂໍ້ມູນ</td></tr>' : ''}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+            } catch (error) {
+                content.innerHTML = `<div class="empty-state"><p>ເກີດຂໍ້ຜິດພາດ: ${error.message}</p></div>`;
+            }
+            hideLoading();
+        }
+
+        // ============================================
+        // MENU MANAGEMENT
+        // ============================================
+        async function loadMenuManagement() {
+            const content = document.getElementById('content-area');
+            showLoading();
+            try {
+                const supabase = initSupabase();
+                const { data: menu } = await supabase.from('menu_items').select('*, categories(name_lo)').order('created_at');
+                const { data: cats } = await supabase.from('categories').select('*').order('display_order');
+                
+                content.innerHTML = `
+                    <div class="data-table-container">
+                        <div class="table-header">
+                            <h3 class="table-title"><i class="fas fa-utensils"></i> ລາຍການອາຫານ</h3>
+                            <div class="table-actions">
+                                <button class="btn btn-primary btn-sm" onclick="showAddMenuItemModal()"><i class="fas fa-plus"></i> ເພີ່ມອາຫານ</button>
+                                <button class="btn btn-outline btn-sm" onclick="showAddCategoryModal()"><i class="fas fa-tag"></i> ເພີ່ມໝວດໝູ່</button>
+                            </div>
+                        </div>
+                        <div style="overflow-x:auto;">
+                            <table class="data-table">
+                                <thead><tr><th>ລະຫັດ</th><th>ຊື່ອາຫານ</th><th>ໝວດໝູ່</th><th>ລາຄາ (₭)</th><th>ສະຖານະ</th><th>ຈັດການ</th></tr></thead>
+                                <tbody>
+                                    ${menu?.map(item => `
+                                        <tr>
+                                            <td><code>${item.code || '-'}</code></td>
+                                            <td><strong>${item.name_lo}</strong></td>
+                                            <td>${item.categories?.name_lo || '-'}</td>
+                                            <td>${formatCurrency(item.price)}</td>
+                                            <td>${item.is_available ? '<span class="status-badge status-success">ພ້ອມ</span>' : '<span class="status-badge status-pending">ຢຸດ</span>'}</td>
+                                            <td><button class="btn btn-outline btn-sm" onclick="editMenuItem('${item.id}')"><i class="fas fa-edit"></i></button>
+                                                <button class="btn btn-danger btn-sm" onclick="toggleMenuItemStatus('${item.id}', ${!item.is_available})"><i class="fas ${item.is_available ? 'fa-ban' : 'fa-check'}"></i></button>
+                                            </td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+            } catch (error) {
+                content.innerHTML = `<div class="empty-state"><p>ເກີດຂໍ້ຜິດພາດ: ${error.message}</p></div>`;
+            }
+            hideLoading();
+        }
+
+        async function showAddMenuItemModal() {
+            const supabase = initSupabase();
+            const { data: categories } = await supabase.from('categories').select('*');
+            
+            const modal = document.createElement('div');
+            modal.className = 'modal show';
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <div class="modal-header"><h3><i class="fas fa-plus-circle"></i> ເພີ່ມອາຫານໃໝ່</h3><button class="close-btn" onclick="this.closest(\'.modal\').remove()">&times;</button></div>
+                    <div class="modal-body">
+                        <div class="form-group"><label>ລະຫັດ</label><input type="text" id="item_code" placeholder="MENU001"></div>
+                        <div class="form-group"><label>ຊື່ອາຫານ (ລາວ) <span class="required">*</span></label><input type="text" id="item_name_lo"></div>
+                        <div class="form-group"><label>ໝວດໝູ່</label><select id="item_category">${categories?.map(c => `<option value="${c.id}">${c.name_lo}</option>`).join('')}</select></div>
+                        <div class="form-group"><label>ລາຄາ (₭)</label><input type="number" id="item_price" value="0"></div>
+                        <div class="form-group"><label>ລາຍລະອຽດ</label><textarea id="item_description" rows="2"></textarea></div>
+                        <div class="form-group"><label><input type="checkbox" id="item_recommended"> ອາຫານແນະນຳ</label></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" onclick="this.closest(\'.modal\').remove()">ຍົກເລີກ</button>
+                        <button class="btn btn-primary" onclick="saveMenuItem()">ບັນທຶກ</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
+        async function saveMenuItem() {
+            const supabase = initSupabase();
+            const code = document.getElementById('item_code')?.value;
+            const name_lo = document.getElementById('item_name_lo')?.value;
+            const category_id = document.getElementById('item_category')?.value;
+            const price = parseFloat(document.getElementById('item_price')?.value) || 0;
+            const description_lo = document.getElementById('item_description')?.value;
+            const is_recommended = document.getElementById('item_recommended')?.checked;
+            
+            if (!name_lo) {
+                showToast('ແຈ້ງເຕືອນ', 'ກະລຸນາປ້ອນຊື່ອາຫານ', 'error');
+                return;
+            }
+            
+            showLoading();
+            try {
+                await supabase.from('menu_items').insert([{
+                    code: code || `ITEM${Date.now()}`,
+                    name_lo,
+                    category_id,
+                    price,
+                    description_lo,
+                    is_recommended,
+                    is_available: true
+                }]);
+                hideLoading();
+                document.querySelector('.modal.show')?.remove();
+                showToast('ສຳເລັດ', 'ເພີ່ມອາຫານສຳເລັດ');
+                loadMenuManagement();
+            } catch (error) {
+                hideLoading();
+                showToast('ຜິດພາດ', error.message, 'error');
+            }
+        }
+
+        async function toggleMenuItemStatus(id, newStatus) {
+            const supabase = initSupabase();
+            showLoading();
+            try {
+                await supabase.from('menu_items').update({ is_available: newStatus }).eq('id', id);
+                hideLoading();
+                showToast('ສຳເລັດ', `ປ່ຽນສະຖານະສຳເລັດ`);
+                loadMenuManagement();
+            } catch (error) {
+                hideLoading();
+                showToast('ຜິດພາດ', error.message, 'error');
+            }
+        }
+
+        // ============================================
+        // TABLES MANAGEMENT
+        // ============================================
+        async function loadTablesManagement() {
+            const content = document.getElementById('content-area');
+            showLoading();
+            try {
+                const supabase = initSupabase();
+                const { data: tables } = await supabase.from('restaurant_tables').select('*').order('table_number');
+                
+                content.innerHTML = `
+                    <div class="data-table-container">
+                        <div class="table-header">
+                            <h3 class="table-title"><i class="fas fa-chair"></i> ຈັດການໂຕະ</h3>
+                            <div class="table-actions">
+                                <button class="btn btn-outline btn-sm" onclick="generateAllQRCodes()"><i class="fas fa-qrcode"></i> ສ້າງ QR ທັງໝົດ</button>
+                            </div>
+                        </div>
+                        <div class="table-grid">
+                            ${tables?.map(table => `
+                                <div class="table-card ${table.status === 'occupied' ? 'occupied' : ''}" onclick="showTableQR('${table.id}', ${table.table_number})">
+                                    <div class="table-number">ໂຕະ ${table.table_number}</div>
+                                    <div class="table-status">${table.status === 'available' ? 'ຫວ່າງ' : 'ມີລູກຄ້າ'}</div>
+                                    <div><i class="fas fa-qrcode" style="margin-top:8px; color:var(--primary);"></i></div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            } catch (error) {
+                content.innerHTML = `<div class="empty-state"><p>ເກີດຂໍ້ຜິດພາດ: ${error.message}</p></div>`;
+            }
+            hideLoading();
+        }
+
+        async function showTableQR(tableId, tableNumber) {
+            const supabase = initSupabase();
+            const qrData = `${window.location.origin}?table=${tableId}`;
+            
+            const modal = document.createElement('div');
+            modal.className = 'modal show';
+            modal.innerHTML = `
+                <div class="modal-content" style="max-width:400px;">
+                    <div class="modal-header"><h3><i class="fas fa-qrcode"></i> QR Code ໂຕະ ${tableNumber}</h3><button class="close-btn" onclick="this.closest(\'.modal\').remove()">&times;</button></div>
+                    <div class="modal-body" style="text-align:center;">
+                        <div id="qrcode"></div>
+                        <p style="margin-top:16px;">ສະແກນ QR ນີ້ເພື່ອສັ່ງອາຫານ</p>
+                        <button class="btn btn-outline btn-sm" onclick="copyToClipboard('${qrData}')"><i class="fas fa-copy"></i> ສຳເນົາ URL</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            new QRCode(document.getElementById("qrcode"), { text: qrData, width: 200, height: 200 });
+            
+            // Update table QR in database
+            await supabase.from('restaurant_tables').update({ qr_code: qrData }).eq('id', tableId);
+        }
+
+        async function generateAllQRCodes() {
+            const supabase = initSupabase();
+            showLoading();
+            try {
+                const { data: tables } = await supabase.from('restaurant_tables').select('*');
+                for (const table of tables) {
+                    const qrData = `${window.location.origin}?table=${table.id}`;
+                    await supabase.from('restaurant_tables').update({ qr_code: qrData }).eq('id', table.id);
+                }
+                hideLoading();
+                showToast('ສຳເລັດ', 'ສ້າງ QR Code ທັງໝົດສຳເລັດ');
+                loadTablesManagement();
+            } catch (error) {
+                hideLoading();
+                showToast('ຜິດພາດ', error.message, 'error');
+            }
+        }
+
+        // ============================================
+        // ALL ORDERS (POS)
+        // ============================================
+        async function loadAllOrders() {
+            const content = document.getElementById('content-area');
+            showLoading();
+            try {
+                const supabase = initSupabase();
+                const { data: orders } = await supabase
+                    .from('orders')
+                    .select('*, restaurant_tables(table_number)')
+                    .order('created_at', { ascending: false });
+                
+                content.innerHTML = `
+                    <div class="data-table-container">
+                        <div class="table-header">
+                            <h3 class="table-title"><i class="fas fa-clipboard-list"></i> ລາຍການຄຳສັ່ງທັງໝົດ</h3>
+                            <div class="table-actions">
+                                <input type="text" id="order-search" class="search-input" placeholder="ຄົ້ນຫາ..." style="width:200px; padding:6px 12px;">
+                            </div>
+                        </div>
+                        <div style="overflow-x:auto;">
+                            <table class="data-table">
+                                <thead><tr><th>ເລກຄຳສັ່ງ</th><th>ໂຕະ</th><th>ລູກຄ້າ</th><th>ຍອດລວມ</th><th>ສະຖານະ</th><th>ເວລາ</th><th>ຈັດການ</th></tr></thead>
+                                <tbody>
+                                    ${orders?.map(order => `
+                                        <tr>
+                                            <td><strong>${order.order_number || '-'}</strong></td>
+                                            <td>ໂຕະ ${order.restaurant_tables?.table_number || '-'}</td>
+                                            <td>${order.customer_name || 'ບໍ່ລະບຸ'}</td>
+                                            <td>${formatCurrency(order.total_amount)}</td>
+                                            <td><span class="status-badge status-${order.status}">${getStatusLabel(order.status)}</span></td>
+                                            <td>${formatDateTime(order.created_at)}</td>
+                                            <td>
+                                                <button class="btn btn-success btn-sm" onclick="confirmOrder('${order.id}')" ${order.status !== 'pending' ? 'disabled' : ''}><i class="fas fa-check"></i></button>
+                                                <button class="btn btn-primary btn-sm" onclick="viewOrderDetail('${order.id}')"><i class="fas fa-eye"></i></button>
+                                                ${order.status === 'completed' ? `<button class="btn btn-primary btn-sm" onclick="markAsPaid('${order.id}')"><i class="fas fa-money-bill"></i></button>` : ''}
+                                            </td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+                
+                document.getElementById('order-search')?.addEventListener('keyup', (e) => {
+                    const search = e.target.value.toLowerCase();
+                    document.querySelectorAll('#content-area .data-table tbody tr').forEach(row => {
+                        row.style.display = row.textContent.toLowerCase().includes(search) ? '' : 'none';
+                    });
+                });
+            } catch (error) {
+                content.innerHTML = `<div class="empty-state"><p>ເກີດຂໍ້ຜິດພາດ: ${error.message}</p></div>`;
+            }
+            hideLoading();
+        }
+
+        async function confirmOrder(orderId) {
+            const supabase = initSupabase();
+            showLoading();
+            try {
+                await supabase.from('orders').update({ 
+                    status: 'confirmed', 
+                    confirmed_at: new Date().toISOString() 
+                }).eq('id', orderId);
+                
+                // Update order items status
+                await supabase.from('order_items').update({ status: 'confirmed' }).eq('order_id', orderId);
+                
+                hideLoading();
+                showToast('ສຳເລັດ', 'ຢືນຢັນຄຳສັ່ງສຳເລັດ, ສົ່ງໄປເຮືອນຄົວແລ້ວ');
+                loadAllOrders();
+                loadKDS();
+            } catch (error) {
+                hideLoading();
+                showToast('ຜິດພາດ', error.message, 'error');
+            }
+        }
+
+        async function markAsPaid(orderId) {
+            const supabase = initSupabase();
+            showLoading();
+            try {
+                await supabase.from('orders').update({ 
+                    status: 'paid', 
+                    paid_at: new Date().toISOString() 
+                }).eq('id', orderId);
+                
+                // Free up the table
+                const { data: order } = await supabase.from('orders').select('table_id').eq('id', orderId).single();
+                if (order?.table_id) {
+                    await supabase.from('restaurant_tables').update({ status: 'available' }).eq('id', order.table_id);
+                }
+                
+                hideLoading();
+                showToast('ສຳເລັດ', 'ບັນທຶກການຊຳລະສຳເລັດ');
+                loadAllOrders();
+                loadDashboard();
+            } catch (error) {
+                hideLoading();
+                showToast('ຜິດພາດ', error.message, 'error');
+            }
+        }
+
+        async function viewOrderDetail(orderId) {
+            const supabase = initSupabase();
+            showLoading();
+            try {
+                const { data: order } = await supabase
+                    .from('orders')
+                    .select('*, restaurant_tables(table_number), order_items(*, menu_items(*))')
+                    .eq('id', orderId)
+                    .single();
+                
+                const modal = document.createElement('div');
+                modal.className = 'modal show';
+                modal.innerHTML = `
+                    <div class="modal-content modal-lg">
+                        <div class="modal-header"><h3><i class="fas fa-receipt"></i> ລາຍລະອຽດຄຳສັ່ງ ${order.order_number}</h3><button class="close-btn" onclick="this.closest(\'.modal\').remove()">&times;</button></div>
+                        <div class="modal-body">
+                            <div class="form-row">
+                                <div class="form-group"><label>ເລກຄຳສັ່ງ</label><input type="text" value="${order.order_number}" readonly></div>
+                                <div class="form-group"><label>ໂຕະ</label><input type="text" value="ໂຕະ ${order.restaurant_tables?.table_number || '-'}" readonly></div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group"><label>ຊື່ລູກຄ້າ</label><input type="text" value="${order.customer_name || '-'}" readonly></div>
+                                <div class="form-group"><label>ເບີໂທ</label><input type="text" value="${order.customer_phone || '-'}" readonly></div>
+                            </div>
+                            <div class="form-group"><label>ສະຖານະ</label><input type="text" value="${getStatusLabel(order.status)}" readonly></div>
+                            <div class="form-group"><label>ລາຍການອາຫານ</label>
+                                <div style="border:1px solid var(--gray-200); border-radius:8px; padding:12px;">
+                                    ${order.order_items?.map(item => `
+                                        <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #eee;">
+                                            <div><strong>${item.menu_item_name || item.menu_items?.name_lo}</strong> x ${item.quantity}</div>
+                                            <div>${formatCurrency(item.subtotal)}</div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                            <div class="form-group"><label>ລວມທັງໝົດ</label><input type="text" value="${formatCurrency(order.total_amount)}" readonly style="font-weight:bold; color:var(--primary);"></div>
+                            <div class="form-group"><label>ໝາຍເຫດພິເສດ</label><textarea readonly rows="2">${order.special_instructions || '-'}</textarea></div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" onclick="this.closest(\'.modal\').remove()">ປິດ</button>
+                            ${order.status === 'confirmed' ? `<button class="btn btn-warning" onclick="startCooking('${order.id}')">ເລີ່ມເຮັດອາຫານ</button>` : ''}
+                            ${order.status === 'cooking' ? `<button class="btn btn-success" onclick="completeOrder('${order.id}')">ອາຫານສຳເລັດ</button>` : ''}
+                            ${order.status === 'completed' ? `<button class="btn btn-primary" onclick="markAsPaid('${order.id}')">ຊຳລະເງິນ</button>` : ''}
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+            } catch (error) {
+                showToast('ຜິດພາດ', error.message, 'error');
+            }
+            hideLoading();
+        }
+
+        // ============================================
+        // KITCHEN DISPLAY SYSTEM (KDS)
+        // ============================================
+        async function loadKDS() {
+            const content = document.getElementById('content-area');
+            showLoading();
+            try {
+                const supabase = initSupabase();
+                const { data: orders } = await supabase
+                    .from('orders')
+                    .select('*, restaurant_tables(table_number), order_items(*)')
+                    .in('status', ['confirmed', 'cooking'])
+                    .order('confirmed_at', { ascending: true });
+                
+                content.innerHTML = `
+                    <div class="data-table-container">
+                        <div class="table-header">
+                            <h3 class="table-title"><i class="fas fa-tv"></i> ຈໍສະແດງຜົນເຮືອນຄົວ (KDS)</h3>
+                            <div class="table-actions">
+                                <button class="btn btn-outline btn-sm" onclick="loadKDS()"><i class="fas fa-sync-alt"></i> ຣີໂຫຼດ</button>
+                            </div>
+                        </div>
+                        <div class="kds-grid" style="padding:16px;">
+                            ${orders?.map(order => {
+                                const timeSince = order.confirmed_at ? Math.floor((new Date() - new Date(order.confirmed_at)) / 60000) : 0;
+                                return `
+                                    <div class="kds-order-card" style="border-left-color: ${timeSince > 20 ? 'var(--danger)' : timeSince > 10 ? 'var(--warning)' : 'var(--success)'}">
+                                        <div class="kds-order-header">
+                                            <div><strong>ເລກຄຳສັ່ງ: ${order.order_number}</strong><br><small>ໂຕະ ${order.restaurant_tables?.table_number || '-'}</small></div>
+                                            <div class="timer"><i class="fas fa-clock"></i> ${timeSince} ນາທີ</div>
+                                        </div>
+                                        <div class="kds-items">
+                                            ${order.order_items?.filter(i => i.status !== 'completed').map(item => `
+                                                <div class="kds-item">
+                                                    <div><strong>${item.menu_item_name}</strong> x ${item.quantity}</div>
+                                                    <div>
+                                                        ${item.special_instructions ? `<small style="color:var(--warning)"><i class="fas fa-comment"></i> ${item.special_instructions}</small><br>` : ''}
+                                                        <button class="btn btn-success btn-sm" onclick="markItemComplete('${item.id}', '${order.id}')">ສຳເລັດ</button>
+                                                    </div>
+                                                </div>
+                                            `).join('')}
+                                        </div>
+                                        <div style="margin-top:12px;">
+                                            <button class="btn btn-primary btn-sm" style="width:100%;" onclick="markOrderComplete('${order.id}')">ສຳເລັດທຸກລາຍການ</button>
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                            ${(!orders || orders.length === 0) ? '<div class="empty-state" style="grid-column:1/-1;">ບໍ່ມີຄຳສັ່ງທີ່ລໍຖ້າ</div>' : ''}
+                        </div>
+                    </div>
+                `;
+            } catch (error) {
+                content.innerHTML = `<div class="empty-state"><p>ເກີດຂໍ້ຜິດພາດ: ${error.message}</p></div>`;
+            }
+            hideLoading();
+        }
+
+        async function markItemComplete(itemId, orderId) {
+            const supabase = initSupabase();
+            showLoading();
+            try {
+                await supabase.from('order_items').update({ status: 'completed' }).eq('id', itemId);
+                
+                // Check if all items are completed
+                const { data: items } = await supabase.from('order_items').select('status').eq('order_id', orderId);
+                const allCompleted = items?.every(i => i.status === 'completed');
+                
+                if (allCompleted) {
+                    await supabase.from('orders').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', orderId);
+                }
+                
+                hideLoading();
+                showToast('ສຳເລັດ', 'ອັບເດດສະຖານະສຳເລັດ');
+                loadKDS();
+                loadAllOrders();
+            } catch (error) {
+                hideLoading();
+                showToast('ຜິດພາດ', error.message, 'error');
+            }
+        }
+
+        async function markOrderComplete(orderId) {
+            const supabase = initSupabase();
+            showLoading();
+            try {
+                await supabase.from('order_items').update({ status: 'completed' }).eq('order_id', orderId);
+                await supabase.from('orders').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', orderId);
+                hideLoading();
+                showToast('ສຳເລັດ', 'ຄຳສັ່ງສຳເລັດທັງໝົດ');
+                loadKDS();
+                loadAllOrders();
+            } catch (error) {
+                hideLoading();
+                showToast('ຜິດພາດ', error.message, 'error');
+            }
+        }
+
+        async function startCooking(orderId) {
+            const supabase = initSupabase();
+            showLoading();
+            try {
+                await supabase.from('orders').update({ status: 'cooking' }).eq('id', orderId);
+                await supabase.from('order_items').update({ status: 'cooking' }).eq('order_id', orderId);
+                hideLoading();
+                showToast('ສຳເລັດ', 'ເລີ່ມເຮັດອາຫານ');
+                document.querySelector('.modal.show')?.remove();
+                loadKDS();
+                loadAllOrders();
+            } catch (error) {
+                hideLoading();
+                showToast('ຜິດພາດ', error.message, 'error');
+            }
+        }
+
+        async function completeOrder(orderId) {
+            const supabase = initSupabase();
+            showLoading();
+            try {
+                await supabase.from('order_items').update({ status: 'completed' }).eq('order_id', orderId);
+                await supabase.from('orders').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', orderId);
+                hideLoading();
+                showToast('ສຳເລັດ', 'ອາຫານສຳເລັດພ້ອມສົ່ງ');
+                document.querySelector('.modal.show')?.remove();
+                loadKDS();
+                loadAllOrders();
+            } catch (error) {
+                hideLoading();
+                showToast('ຜິດພາດ', error.message, 'error');
+            }
+        }
+
+        // ============================================
+        // REPORTS
+        // ============================================
+        async function loadReports() {
+            const content = document.getElementById('content-area');
+            showLoading();
+            try {
+                const supabase = initSupabase();
+                const { data: orders } = await supabase.from('orders').select('*').eq('status', 'paid');
+                
+                const totalRevenue = orders?.reduce((sum, o) => sum + (o.total_amount || 0), 0) || 0;
+                const todayRevenue = orders?.filter(o => o.paid_at?.startsWith(new Date().toISOString().split('T')[0]))
+                    .reduce((sum, o) => sum + (o.total_amount || 0), 0) || 0;
+                
+                content.innerHTML = `
+                    <div class="data-table-container">
+                        <div class="table-header">
+                            <h3 class="table-title"><i class="fas fa-chart-line"></i> ລາຍງານການເງິນ</h3>
+                        </div>
+                        <div class="dashboard-stats" style="padding:20px;">
+                            <div class="stat-card"><div class="stat-header"><span class="stat-label">ລາຍຮັບທັງໝົດ</span><div class="stat-icon"><i class="fas fa-chart-line"></i></div></div><div class="stat-value">${formatCurrency(totalRevenue)}</div></div>
+                            <div class="stat-card"><div class="stat-header"><span class="stat-label">ລາຍຮັບມື້ນີ້</span><div class="stat-icon"><i class="fas fa-calendar-day"></i></div></div><div class="stat-value">${formatCurrency(todayRevenue)}</div></div>
+                            <div class="stat-card"><div class="stat-header"><span class="stat-label">ຄຳສັ່ງທັງໝົດ</span><div class="stat-icon"><i class="fas fa-clipboard-list"></i></div></div><div class="stat-value">${orders?.length || 0}</div></div>
+                        </div>
+                        <div class="table-header"><h3 class="table-title">ປະຫວັດການຊຳລະ</h3></div>
+                        <div style="overflow-x:auto;">
+                            <table class="data-table">
+                                <thead><tr><th>ເລກຄຳສັ່ງ</th><th>ວັນທີ</th><th>ລູກຄ້າ</th><th>ຍອດລວມ</th></tr></thead>
+                                <tbody>
+                                    ${orders?.map(order => `
+                                        <tr>
+                                            <td>${order.order_number || '-'}</td>
+                                            <td>${formatDateTime(order.paid_at)}</td
+                                            <td>${order.customer_name || '-'}</td>
+                                            <td>${formatCurrency(order.total_amount)}</td
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+            } catch (error) {
+                content.innerHTML = `<div class="empty-state"><p>ເກີດຂໍ້ຜິດພາດ: ${error.message}</p></div>`;
+            }
+            hideLoading();
+        }
+
+        // ============================================
+        // STAFF MANAGEMENT
+        // ============================================
+        async function loadStaffManagement() {
+            const content = document.getElementById('content-area');
+            showLoading();
+            try {
+                const supabase = initSupabase();
+                const { data: staff } = await supabase.from('staff').select('*');
+                
+                content.innerHTML = `
+                    <div class="data-table-container">
+                        <div class="table-header">
+                            <h3 class="table-title"><i class="fas fa-users-cog"></i> ຈັດການພະນັກງານ</h3>
+                            <button class="btn btn-primary btn-sm" onclick="showAddStaffModal()"><i class="fas fa-plus"></i> ເພີ່ມພະນັກງານ</button>
+                        </div>
+                        <div style="overflow-x:auto;">
+                            <table class="data-table">
+                                <thead><tr><th>ຊື່</th><th>ອີເມວ</th><th>ເບີໂທ</th><th>ຕຳແໜ່ງ</th><th>ສະຖານະ</th><th>ຈັດການ</th></tr></thead>
+                                <tbody>
+                                    ${staff?.map(s => `
+                                        <tr>
+                                            <td><strong>${s.name}</strong></td
+                                            <td>${s.email}</td
+                                            <td>${s.phone || '-'}</td
+                                            <td>${s.role === 'cashier' ? 'ເງິນ' : s.role === 'kitchen' ? 'ຄົວ' : s.role === 'waiter' ? 'ບໍລິການ' : 'admin'}</td
+                                            <td><span class="status-badge ${s.active ? 'status-success' : 'status-pending'}">${s.active ? 'ເຮັດວຽກ' : 'ຢຸດ'}</span></td
+                                            <td><button class="btn btn-danger btn-sm" onclick="toggleStaffStatus('${s.id}', ${!s.active})"><i class="fas ${s.active ? 'fa-ban' : 'fa-check'}"></i></button></td
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+            } catch (error) {
+                content.innerHTML = `<div class="empty-state"><p>ເກີດຂໍ້ຜິດພາດ: ${error.message}</p></div>`;
+            }
+            hideLoading();
+        }
+
+        async function toggleStaffStatus(id, newStatus) {
+            const supabase = initSupabase();
+            showLoading();
+            try {
+                await supabase.from('staff').update({ active: newStatus }).eq('id', id);
+                hideLoading();
+                showToast('ສຳເລັດ', 'ປ່ຽນສະຖານະສຳເລັດ');
+                loadStaffManagement();
+            } catch (error) {
+                hideLoading();
+                showToast('ຜິດພາດ', error.message, 'error');
+            }
+        }
+
+        // ============================================
+        // CUSTOMER WEB APP (QR Ordering)
+        // ============================================
+        async function initCustomerApp(tableId) {
+            currentTableId = tableId;
+            currentOrderId = null;
+            cart = [];
+            
+            document.getElementById('login-page').style.display = 'none';
+            document.getElementById('main-app').style.display = 'none';
+            document.getElementById('customer-app').style.display = 'block';
+            document.getElementById('customer-table-info').innerHTML = `ໂຕະ: ${tableId.slice(-2)}`;
+            updateCartUI();
+            
+            await loadCustomerMenu();
+        }
+
+        async function loadCustomerMenu() {
+            const supabase = initSupabase();
+            showLoading();
+            try {
+                const { data: cats } = await supabase.from('categories').select('*').eq('is_active', true).order('display_order');
+                const { data: items } = await supabase.from('menu_items').select('*').eq('is_available', true);
+                menuItems = items || [];
+                categories = cats || [];
+                
+                // Render category tabs
+                const tabsContainer = document.getElementById('category-tabs');
+                tabsContainer.innerHTML = '<div class="category-tab active" data-category="all">ທັງໝົດ</div>';
+                categories.forEach(cat => {
+                    tabsContainer.innerHTML += `<div class="category-tab" data-category="${cat.id}">${cat.name_lo}</div>`;
+                });
+                
+                // Add click handlers
+                document.querySelectorAll('.category-tab').forEach(tab => {
+                    tab.onclick = () => {
+                        document.querySelectorAll('.category-tab').forEach(t => t.classList.remove('active'));
+                        tab.classList.add('active');
+                        filterCustomerMenu(tab.dataset.category);
+                    };
+                });
+                
+                filterCustomerMenu('all');
+            } catch (error) {
+                showToast('ຜິດພາດ', error.message, 'error');
+            }
+            hideLoading();
+        }
+
+        function filterCustomerMenu(categoryId) {
+            let filtered = menuItems;
+            if (categoryId !== 'all') {
+                filtered = menuItems.filter(item => item.category_id === categoryId);
+            }
+            
+            const container = document.getElementById('customer-content');
+            container.innerHTML = `
+                <div class="menu-grid">
+                    ${filtered.map(item => `
+                        <div class="menu-card" onclick="addToCart('${item.id}', '${item.name_lo.replace(/'/g, "\\'")}', ${item.price})">
+                            <div class="menu-image"><i class="fas fa-utensils fa-3x" style="color:var(--gray-400);"></i></div>
+                            <div class="menu-info">
+                                <div class="menu-name">${item.name_lo}</div>
+                                <div class="menu-price">${formatCurrency(item.price)}</div>
+                                ${item.is_recommended ? '<span style="font-size:10px; background:var(--warning-light); padding:2px 6px; border-radius:10px;">ແນະນຳ</span>' : ''}
+                                ${item.description_lo ? `<div class="menu-description">${item.description_lo}</div>` : ''}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        function addToCart(id, name, price) {
+            const existing = cart.find(item => item.id === id);
+            if (existing) {
+                existing.quantity++;
+                existing.subtotal = existing.quantity * existing.price;
+            } else {
+                cart.push({ id, name, price, quantity: 1, subtotal: price });
+            }
+            updateCartUI();
+            showToast('ເພີ່ມສຳເລັດ', `ເພີ່ມ ${name} ເຂົ້າກະຕ່າ`);
+        }
+
+        function updateCartUI() {
+            const itemCount = cart.reduce((sum, i) => sum + i.quantity, 0);
+            const total = cart.reduce((sum, i) => sum + i.subtotal, 0);
+            
+            document.getElementById('cart-count').textContent = itemCount;
+            document.getElementById('cart-count').style.display = itemCount > 0 ? 'flex' : 'none';
+            document.getElementById('cart-total-amount').textContent = formatCurrency(total);
+            
+            const cartItemsContainer = document.getElementById('cart-items');
+            if (cart.length === 0) {
+                cartItemsContainer.innerHTML = '<div style="text-align:center; padding:40px;"><i class="fas fa-shopping-cart fa-2x" style="color:var(--gray-400);"></i><p>ຍັງບໍ່ມີລາຍການ</p></div>';
+                return;
+            }
+            
+            cartItemsContainer.innerHTML = cart.map(item => `
+                <div class="cart-item">
+                    <div class="cart-item-info">
+                        <div class="cart-item-name">${item.name}</div>
+                        <div class="cart-item-price">${formatCurrency(item.price)}</div>
+                    </div>
+                    <div class="cart-item-qty">
+                        <button class="qty-btn" onclick="updateCartQty('${item.id}', -1)">-</button>
+                        <span style="min-width:30px; text-align:center;">${item.quantity}</span>
+                        <button class="qty-btn" onclick="updateCartQty('${item.id}', 1)">+</button>
+                        <button class="qty-btn" style="background:var(--danger-light);" onclick="removeFromCart('${item.id}')"><i class="fas fa-trash" style="font-size:10px;"></i></button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function updateCartQty(id, delta) {
+            const item = cart.find(i => i.id === id);
+            if (item) {
+                item.quantity += delta;
+                if (item.quantity <= 0) {
+                    cart = cart.filter(i => i.id !== id);
+                } else {
+                    item.subtotal = item.quantity * item.price;
+                }
+                updateCartUI();
+            }
+        }
+
+        function removeFromCart(id) {
+            cart = cart.filter(i => i.id !== id);
+            updateCartUI();
+        }
+
+        function openCart() {
+            document.getElementById('cart-sidebar').classList.add('open');
+        }
+
+        function closeCart() {
+            document.getElementById('cart-sidebar').classList.remove('open');
+        }
+
+        async function checkout() {
+            if (cart.length === 0) {
+                showToast('ແຈ້ງເຕືອນ', 'ກະລຸນາເລືອກອາຫານກ່ອນ', 'error');
+                return;
+            }
+            
+            const modal = document.createElement('div');
+            modal.className = 'modal show';
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <div class="modal-header"><h3><i class="fas fa-check-circle"></i> ຢືນຢັນການສັ່ງ</h3><button class="close-btn" onclick="this.closest(\'.modal\').remove()">&times;</button></div>
+                    <div class="modal-body">
+                        <div class="form-group"><label>ຊື່ລູກຄ້າ (ເພື່ອຕິດຕໍ່)</label><input type="text" id="customer_name" placeholder="ຊື່ສະຫຼາຍ"></div>
+                        <div class="form-group"><label>ເບີໂທ (ເພື່ອແຈ້ງເຕືອນ)</label><input type="tel" id="customer_phone" placeholder="020 12345678"></div>
+                        <div class="form-group"><label>ໝາຍເຫດພິເສດ</label><textarea id="special_notes" rows="2" placeholder="ຕົວຢ່າງ: ບໍ່ເຜັດ, ເອົາໃສ່ຖົງ..."></textarea></div>
+                        <div style="background:var(--gray-100); padding:12px; border-radius:8px;">
+                            <div style="display:flex; justify-content:space-between;"><strong>ລວມທັງໝົດ</strong><strong>${formatCurrency(cart.reduce((s,i)=>s+i.subtotal,0))}</strong></div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" onclick="this.closest(\'.modal\').remove()">ຍົກເລີກ</button>
+                        <button class="btn btn-primary" onclick="submitOrder()">ຢືນຢັນການສັ່ງ</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
+        async function submitOrder() {
+            const supabase = initSupabase();
+            const customerName = document.getElementById('customer_name')?.value || 'ລູກຄ້າ';
+            const customerPhone = document.getElementById('customer_phone')?.value;
+            const specialNotes = document.getElementById('special_notes')?.value;
+            const totalAmount = cart.reduce((sum, i) => sum + i.subtotal, 0);
+            const orderNumber = `ORD${Date.now()}`;
+            
+            showLoading();
+            try {
+                // Create order
+                const { data: order, error: orderError } = await supabase.from('orders').insert([{
+                    order_number: orderNumber,
+                    table_id: currentTableId,
+                    customer_name: customerName,
+                    customer_phone: customerPhone,
+                    order_type: 'dine_in',
+                    status: 'pending',
+                    special_instructions: specialNotes,
+                    total_amount: totalAmount
+                }]).select().single();
+                
+                if (orderError) throw orderError;
+                
+                // Create order items
+                const orderItems = cart.map(item => ({
+                    order_id: order.id,
+                    menu_item_id: item.id,
+                    menu_item_name: item.name,
+                    quantity: item.quantity,
+                    unit_price: item.price,
+                    subtotal: item.subtotal,
+                    status: 'pending'
+                }));
+                
+                const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
+                if (itemsError) throw itemsError;
+                
+                // Mark table as occupied
+                await supabase.from('restaurant_tables').update({ status: 'occupied' }).eq('id', currentTableId);
+                
+                hideLoading();
+                document.querySelector('.modal.show')?.remove();
+                closeCart();
+                cart = [];
+                updateCartUI();
+                
+                showToast('ສຳເລັດ', `ສັ່ງອາຫານສຳເລັດ! ເລກຄຳສັ່ງ: ${orderNumber}`, 'success');
+                
+                // Show order status
+                setTimeout(() => {
+                    alert(`ຄຳສັ່ງຂອງທ່ານຖືກສົ່ງໄປເຮືອນຄົວແລ້ວ\nເລກຄຳສັ່ງ: ${orderNumber}\nກະລຸນາລໍຖ້າພະນັກງານນຳສົ່ງອາຫານ`);
+                }, 500);
+                
+            } catch (error) {
+                hideLoading();
+                showToast('ຜິດພາດ', error.message, 'error');
+            }
+        }
+
+        // ============================================
+        // HELPER FUNCTIONS
+        // ============================================
+        function showCustomerQRView() {
+            const supabase = initSupabase();
+            const modal = document.createElement('div');
+            modal.className = 'modal show';
+            modal.innerHTML = `
+                <div class="modal-content" style="max-width:400px;">
+                    <div class="modal-header"><h3><i class="fas fa-qrcode"></i> QR ສຳລັບລູກຄ້າ</h3><button class="close-btn" onclick="this.closest(\'.modal\').remove()">&times;</button></div>
+                    <div class="modal-body" style="text-align:center;">
+                        <div id="demo-qrcode"></div>
+                        <p style="margin-top:16px;">ນຳ QR ນີ້ໄປວາງທີ່ໂຕະເພື່ອໃຫ້ລູກຄ້າສະແກນ</p>
+                        <select id="qr-table-select" class="form-control" style="margin-top:12px;"></select>
+                        <button class="btn btn-primary btn-sm" style="margin-top:12px;" onclick="generateQRForSelectedTable()">ສ້າງ QR</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            
+            // Load tables
+            supabase.from('restaurant_tables').select('*').then(({ data }) => {
+                const select = document.getElementById('qr-table-select');
+                select.innerHTML = data?.map(t => `<option value="${t.id}">ໂຕະ ${t.table_number}</option>`).join('');
+            });
+        }
+
+        function generateQRForSelectedTable() {
+            const tableId = document.getElementById('qr-table-select')?.value;
+            if (!tableId) return;
+            const qrData = `${window.location.origin}?table=${tableId}`;
+            document.getElementById('demo-qrcode').innerHTML = '';
+            new QRCode(document.getElementById("demo-qrcode"), { text: qrData, width: 200, height: 200 });
+            showToast('ສຳເລັດ', 'ສ້າງ QR ສຳເລັດ');
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text);
+            showToast('ສຳເລັດ', 'ສຳເນົາແລ້ວ');
+        }
+
+        // ============================================
+        // INITIALIZATION
+        // ============================================
+        document.addEventListener('DOMContentLoaded', async () => {
+            initSupabase();
+            await setupDatabase();
+            
+            // Check for table parameter in URL (customer QR scan)
+            const urlParams = new URLSearchParams(window.location.search);
+            const tableId = urlParams.get('table');
+            if (tableId) {
+                await initCustomerApp(tableId);
+                return;
+            }
+            
+            const savedUser = localStorage.getItem('restaurant_user');
+            if (savedUser) {
+                currentUser = JSON.parse(savedUser);
+                showMainApp();
+            } else {
+                document.getElementById('login-page').style.display = 'flex';
+            }
+            
+            document.getElementById('login-btn').addEventListener('click', async () => {
+                const email = document.getElementById('email').value;
+                const password = document.getElementById('password').value;
+                const role = document.getElementById('role').value;
+                const errorDiv = document.getElementById('login-error');
+                
+                if (!role) {
+                    errorDiv.textContent = 'ກະລຸນາເລືອກຕຳແໜ່ງ';
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+                
+                const success = await login(email, password, role);
+                if (success) {
+                    errorDiv.style.display = 'none';
+                } else {
+                    errorDiv.textContent = 'ອີເມວ ຫຼື ລະຫັດຜ່ານບໍ່ຖືກຕ້ອງ';
+                    errorDiv.style.display = 'block';
+                }
+            });
+            
+            document.getElementById('logout-btn')?.addEventListener('click', logout);
+            document.getElementById('cart-icon')?.addEventListener('click', openCart);
+            
+            // Enter key support
+            ['email', 'password', 'role'].forEach(id => {
+                document.getElementById(id)?.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') document.getElementById('login-btn').click();
+                });
+            });
+        });
+        
+        // Make functions global for HTML onclick
+        window.addToCart = addToCart;
+        window.updateCartQty = updateCartQty;
+        window.removeFromCart = removeFromCart;
+        window.openCart = openCart;
+        window.closeCart = closeCart;
+        window.checkout = checkout;
+        window.submitOrder = submitOrder;
+        window.viewOrderDetail = viewOrderDetail;
+        window.confirmOrder = confirmOrder;
+        window.markAsPaid = markAsPaid;
+        window.startCooking = startCooking;
+        window.completeOrder = completeOrder;
+        window.markItemComplete = markItemComplete;
+        window.markOrderComplete = markOrderComplete;
+        window.editMenuItem = editMenuItem;
+        window.toggleMenuItemStatus = toggleMenuItemStatus;
+        window.showAddMenuItemModal = showAddMenuItemModal;
+        window.showAddCategoryModal = showAddCategoryModal;
+        window.saveMenuItem = saveMenuItem;
+        window.showTableQR = showTableQR;
+        window.generateAllQRCodes = generateAllQRCodes;
+        window.showCustomerQRView = showCustomerQRView;
+        window.generateQRForSelectedTable = generateQRForSelectedTable;
+        window.toggleStaffStatus = toggleStaffStatus;
+        window.showAddStaffModal = showAddStaffModal;
+        window.copyToClipboard = copyToClipboard;
+        
+        async function editMenuItem(id) {
+            const supabase = initSupabase();
+            const { data: item } = await supabase.from('menu_items').select('*').eq('id', id).single();
+            if (!item) return;
+            
+            const modal = document.createElement('div');
+            modal.className = 'modal show';
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <div class="modal-header"><h3><i class="fas fa-edit"></i> ແກ້ໄຂອາຫານ</h3><button class="close-btn" onclick="this.closest(\'.modal\').remove()">&times;</button></div>
+                    <div class="modal-body">
+                        <div class="form-group"><label>ຊື່ອາຫານ (ລາວ)</label><input type="text" id="edit_name_lo" value="${item.name_lo}"></div>
+                        <div class="form-group"><label>ລາຄາ (₭)</label><input type="number" id="edit_price" value="${item.price}"></div>
+                        <div class="form-group"><label>ລາຍລະອຽດ</label><textarea id="edit_description" rows="2">${item.description_lo || ''}</textarea></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" onclick="this.closest(\'.modal\').remove()">ຍົກເລີກ</button>
+                        <button class="btn btn-primary" onclick="updateMenuItem('${id}')">ບັນທຶກ</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+        
+        async function updateMenuItem(id) {
+            const supabase = initSupabase();
+            const name_lo = document.getElementById('edit_name_lo')?.value;
+            const price = parseFloat(document.getElementById('edit_price')?.value) || 0;
+            const description_lo = document.getElementById('edit_description')?.value;
+            
+            showLoading();
+            try {
+                await supabase.from('menu_items').update({ name_lo, price, description_lo }).eq('id', id);
+                hideLoading();
+                document.querySelector('.modal.show')?.remove();
+                showToast('ສຳເລັດ', 'ອັບເດດສຳເລັດ');
+                loadMenuManagement();
+            } catch (error) {
+                hideLoading();
+                showToast('ຜິດພາດ', error.message, 'error');
+            }
+        }
+        
+        async function showAddCategoryModal() {
+            const modal = document.createElement('div');
+            modal.className = 'modal show';
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <div class="modal-header"><h3><i class="fas fa-tag"></i> ເພີ່ມໝວດໝູ່ໃໝ່</h3><button class="close-btn" onclick="this.closest(\'.modal\').remove()">&times;</button></div>
+                    <div class="modal-body">
+                        <div class="form-group"><label>ຊື່ໝວດໝູ່ (ລາວ)</label><input type="text" id="cat_name_lo"></div>
+                        <div class="form-group"><label>ຊື່ໝວດໝູ່ (ອັງກິດ)</label><input type="text" id="cat_name_en"></div>
+                        <div class="form-group"><label>ໄອຄອນ</label><select id="cat_icon"><option value="fa-utensils">ອາຫານ</option><option value="fa-mug-hot">ດື່ມ</option><option value="fa-apple-alt">ກິນລຽບ</option><option value="fa-ice-cream">ຫວານ</option></select></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" onclick="this.closest(\'.modal\').remove()">ຍົກເລີກ</button>
+                        <button class="btn btn-primary" onclick="saveCategory()">ບັນທຶກ</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+        
+        async function saveCategory() {
+            const supabase = initSupabase();
+            const name_lo = document.getElementById('cat_name_lo')?.value;
+            if (!name_lo) {
+                showToast('ແຈ້ງເຕືອນ', 'ກະລຸນາປ້ອນຊື່ໝວດໝູ່', 'error');
+                return;
+            }
+            showLoading();
+            try {
+                await supabase.from('categories').insert([{
+                    name_lo,
+                    name_en: document.getElementById('cat_name_en')?.value,
+                    icon: document.getElementById('cat_icon')?.value
+                }]);
+                hideLoading();
+                document.querySelector('.modal.show')?.remove();
+                showToast('ສຳເລັດ', 'ເພີ່ມໝວດໝູ່ສຳເລັດ');
+                loadMenuManagement();
+            } catch (error) {
+                hideLoading();
+                showToast('ຜິດພາດ', error.message, 'error');
+            }
+        }
+        
+        async function showAddStaffModal() {
+            const modal = document.createElement('div');
+            modal.className = 'modal show';
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <div class="modal-header"><h3><i class="fas fa-user-plus"></i> ເພີ່ມພະນັກງານໃໝ່</h3><button class="close-btn" onclick="this.closest(\'.modal\').remove()">&times;</button></div>
+                    <div class="modal-body">
+                        <div class="form-group"><label>ຊື່</label><input type="text" id="staff_name"></div>
+                        <div class="form-group"><label>ອີເມວ</label><input type="email" id="staff_email"></div>
+                        <div class="form-group"><label>ເບີໂທ</label><input type="tel" id="staff_phone"></div>
+                        <div class="form-group"><label>ຕຳແໜ່ງ</label><select id="staff_role"><option value="cashier">ເງິນ</option><option value="kitchen">ຄົວ</option><option value="waiter">ບໍລິການ</option><option value="admin">ຜູ້ບໍລິຫານ</option></select></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" onclick="this.closest(\'.modal\').remove()">ຍົກເລີກ</button>
+                        <button class="btn btn-primary" onclick="saveStaff()">ບັນທຶກ</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+        
+        async function saveStaff() {
+            const supabase = initSupabase();
+            const name = document.getElementById('staff_name')?.value;
+            const email = document.getElementById('staff_email')?.value;
+            if (!name || !email) {
+                showToast('ແຈ້ງເຕືອນ', 'ກະລຸນາປ້ອນຊື່ ແລະ ອີເມວ', 'error');
+                return;
+            }
+            showLoading();
+            try {
+                await supabase.from('staff').insert([{
+                    name,
+                    email,
+                    phone: document.getElementById('staff_phone')?.value,
+                    role: document.getElementById('staff_role')?.value,
+                    active: true
+                }]);
+                hideLoading();
+                document.querySelector('.modal.show')?.remove();
+                showToast('ສຳເລັດ', 'ເພີ່ມພະນັກງານສຳເລັດ (ລະຫັດຜ່ານເລີ່ມຕົ້ນ: 123456)');
+                loadStaffManagement();
+            } catch (error) {
+                hideLoading();
+                showToast('ຜິດພາດ', error.message, 'error');
+            }
+        }
+    </script>
+</body>
+</html>
