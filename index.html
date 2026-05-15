@@ -1189,7 +1189,7 @@
 
         async function showTableQR(tableId, tableNumber) {
             const supabase = initSupabase();
-            const qrData = `${window.location.origin}?table=${tableId}`;
+            const qrData = `${window.location.origin}/ROS/?table=${tableId}`;
             
             const modal = document.createElement('div');
             modal.className = 'modal show';
