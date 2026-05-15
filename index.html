@@ -1951,15 +1951,13 @@ async function printReceipt(orderId) {
             document.body.appendChild(modal);
         }
 
-        async function submitOrder() {
+    async function submitOrder() {
     const supabase = initSupabase();
     const customerName = document.getElementById('customer_name')?.value || 'ລູກຄ້າ';
     const customerPhone = document.getElementById('customer_phone')?.value;
     const specialNotes = document.getElementById('special_notes')?.value;
     const totalAmount = cart.reduce((sum, i) => sum + i.subtotal, 0);
     const orderNumber = `ORD${Date.now()}`;
-    
-    console.log('Submitting order for table:', currentTableId);
     
     showLoading();
     try {
@@ -1991,18 +1989,26 @@ async function printReceipt(orderId) {
         const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
         if (itemsError) throw itemsError;
         
-        // Mark table as occupied (ສຳຄັນ!)
+        // ============================================
+        // ສ່ວນນີ້ຄືສ່ວນທີ່ຕ້ອງການເພີ່ມ console.log
+        // ============================================
+        console.log('Attempting to update table:', currentTableId);
+        
         const { error: tableError, data: tableData } = await supabase
             .from('restaurant_tables')
             .update({ status: 'occupied' })
             .eq('id', currentTableId)
             .select();
         
+        console.log('Table update - Error:', tableError);
+        console.log('Table update - Data:', tableData);
+        
         if (tableError) {
-            console.error('Table update error:', tableError);
+            console.error('FAILED to update table status:', tableError);
         } else {
-            console.log('Table updated:', tableData);
+            console.log('SUCCESS: Table status updated to occupied');
         }
+        // ============================================
         
         hideLoading();
         document.querySelector('.modal.show')?.remove();
