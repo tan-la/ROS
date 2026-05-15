@@ -1896,7 +1896,6 @@
         // ============================================
         document.addEventListener('DOMContentLoaded', async () => {
             initSupabase();
-            await setupDatabase();
             
             // Check for table parameter in URL (customer QR scan)
             const urlParams = new URLSearchParams(window.location.search);
