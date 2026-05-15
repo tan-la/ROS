@@ -1320,30 +1320,174 @@
     }
 }
         async function markAsPaid(orderId) {
-            const supabase = initSupabase();
-            showLoading();
-            try {
-                await supabase.from('orders').update({ 
-                    status: 'paid', 
-                    paid_at: new Date().toISOString() 
-                }).eq('id', orderId);
-                
-                // Free up the table
-                const { data: order } = await supabase.from('orders').select('table_id').eq('id', orderId).single();
-                if (order?.table_id) {
-                    await supabase.from('restaurant_tables').update({ status: 'available' }).eq('id', order.table_id);
-                }
-                
-                hideLoading();
-                showToast('ສຳເລັດ', 'ບັນທຶກການຊຳລະສຳເລັດ');
-                loadAllOrders();
-                loadDashboard();
-            } catch (error) {
-                hideLoading();
-                showToast('ຜິດພາດ', error.message, 'error');
-            }
+    const supabase = initSupabase();
+    showLoading();
+    try {
+        // ອັບເດດສະຖານະເປັນຊຳລະແລ້ວ
+        await supabase.from('orders').update({ 
+            status: 'paid', 
+            paid_at: new Date().toISOString() 
+        }).eq('id', orderId);
+        
+        // ປ່ອຍໂຕະ
+        const { data: order } = await supabase.from('orders').select('table_id').eq('id', orderId).single();
+        if (order?.table_id) {
+            await supabase.from('restaurant_tables').update({ status: 'available' }).eq('id', order.table_id);
         }
-
+        
+        hideLoading();
+        showToast('ສຳເລັດ', 'ບັນທຶກການຊຳລະສຳເລັດ');
+        
+        // ພິມໃບຮັບເງິນ
+        await printReceipt(orderId);
+        
+        // ຣີໂຫຼດໜ້າ
+        loadAllOrders();
+        loadDashboard();
+        
+    } catch (error) {
+        hideLoading();
+        showToast('ຜິດພາດ', error.message, 'error');
+    }
+}
+        
+// ============================================
+// PRINT RECEIPT FUNCTION
+// ============================================
+async function printReceipt(orderId) {
+    const supabase = initSupabase();
+    showLoading();
+    try {
+        // ດຶງຂໍ້ມູນຄຳສັ່ງ
+        const { data: order, error } = await supabase
+            .from('orders')
+            .select('*, restaurant_tables(table_number), order_items(*)')
+            .eq('id', orderId)
+            .single();
+        
+        if (error) throw error;
+        
+        // ສ້າງໃບຮັບເງິນໃນໜ້າໃໝ່
+        const receiptWindow = window.open('', '_blank');
+        
+        receiptWindow.document.write(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>ໃບຮັບເງິນ - ${order.order_number}</title>
+                <style>
+                    body {
+                        font-family: 'Noto Sans Lao', monospace;
+                        padding: 20px;
+                        max-width: 350px;
+                        margin: 0 auto;
+                    }
+                    .receipt {
+                        border: 1px solid #ddd;
+                        padding: 20px;
+                        border-radius: 8px;
+                    }
+                    .header {
+                        text-align: center;
+                        border-bottom: 1px dashed #000;
+                        padding-bottom: 10px;
+                        margin-bottom: 10px;
+                    }
+                    .header h2 {
+                        margin: 0;
+                        font-size: 16px;
+                    }
+                    .item {
+                        display: flex;
+                        justify-content: space-between;
+                        margin: 5px 0;
+                        font-size: 12px;
+                    }
+                    .total {
+                        border-top: 1px dashed #000;
+                        padding-top: 10px;
+                        margin-top: 10px;
+                        font-weight: bold;
+                    }
+                    .footer {
+                        text-align: center;
+                        border-top: 1px dashed #000;
+                        padding-top: 10px;
+                        margin-top: 10px;
+                        font-size: 10px;
+                    }
+                    .signature {
+                        display: flex;
+                        justify-content: space-between;
+                        margin-top: 20px;
+                        padding-top: 20px;
+                    }
+                    .sign-line {
+                        border-top: 1px solid #000;
+                        width: 120px;
+                        text-align: center;
+                        font-size: 10px;
+                        padding-top: 5px;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="receipt">
+                    <div class="header">
+                        <h2>ຮ້ານອາຫານ</h2>
+                        <p>Restaurant Name</p>
+                        <p>ເລກທີ່ຮັບ: ${order.order_number}</p>
+                        <p>ວັນທີ: ${new Date().toLocaleString('lo-LA')}</p>
+                    </div>
+                    <div>
+                        <p><strong>ໂຕະ:</strong> ${order.restaurant_tables?.table_number || '-'}</p>
+                        <p><strong>ລູກຄ້າ:</strong> ${order.customer_name || '-'}</p>
+                    </div>
+                    <div style="border-top: 1px dashed #000; margin: 10px 0;"></div>
+                    <div class="items">
+                        <div class="item"><strong>ລາຍການ</strong><strong>ລາຄາ</strong></div>
+                        ${order.order_items?.map(item => `
+                            <div class="item">
+                                <span>${item.menu_item_name} x ${item.quantity}</span>
+                                <span>${new Intl.NumberFormat('lo-LA').format(item.subtotal)} ₭</span>
+                            </div>
+                        `).join('') || ''}
+                    </div>
+                    <div class="total">
+                        <div class="item">
+                            <span>ລວມທັງໝົດ</span>
+                            <span><strong>${new Intl.NumberFormat('lo-LA').format(order.total_amount)} ₭</strong></span>
+                        </div>
+                    </div>
+                    <div class="footer">
+                        <p>ຂອບໃຈທີ່ໃຊ້ບໍລິການ</p>
+                        <p>Thank you for dining with us</p>
+                    </div>
+                    <div class="signature">
+                        <div class="sign-line">ລູກຄ້າ</div>
+                        <div class="sign-line">ພະນັກງານ</div>
+                    </div>
+                </div>
+                <script>
+                    setTimeout(() => {
+                        window.print();
+                        setTimeout(() => window.close(), 500);
+                    }, 500);
+                <\/script>
+            </body>
+            </html>
+        `);
+        
+        receiptWindow.document.close();
+        hideLoading();
+        
+    } catch (error) {
+        hideLoading();
+        showToast('ຜິດພາດ', error.message, 'error');
+    }
+}
+        
         async function viewOrderDetail(orderId) {
             const supabase = initSupabase();
             showLoading();
