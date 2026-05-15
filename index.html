@@ -1358,7 +1358,6 @@ async function printReceipt(orderId) {
     const supabase = initSupabase();
     showLoading();
     try {
-        // ດຶງຂໍ້ມູນຄຳສັ່ງ
         const { data: order, error } = await supabase
             .from('orders')
             .select('*, restaurant_tables(table_number), order_items(*)')
@@ -1367,7 +1366,6 @@ async function printReceipt(orderId) {
         
         if (error) throw error;
         
-        // ສ້າງໃບຮັບເງິນໃນໜ້າໃໝ່
         const receiptWindow = window.open('', '_blank');
         
         receiptWindow.document.write(`
@@ -1376,6 +1374,7 @@ async function printReceipt(orderId) {
             <head>
                 <meta charset="UTF-8">
                 <title>ໃບຮັບເງິນ - ${order.order_number}</title>
+                <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"><\/script>
                 <style>
                     body {
                         font-family: 'Noto Sans Lao', monospace;
@@ -1394,10 +1393,7 @@ async function printReceipt(orderId) {
                         padding-bottom: 10px;
                         margin-bottom: 10px;
                     }
-                    .header h2 {
-                        margin: 0;
-                        font-size: 16px;
-                    }
+                    .header h2 { margin: 0; font-size: 16px; }
                     .item {
                         display: flex;
                         justify-content: space-between;
@@ -1430,6 +1426,10 @@ async function printReceipt(orderId) {
                         font-size: 10px;
                         padding-top: 5px;
                     }
+                    .qr-code {
+                        text-align: center;
+                        margin: 15px 0;
+                    }
                 </style>
             </head>
             <body>
@@ -1444,6 +1444,7 @@ async function printReceipt(orderId) {
                         <p><strong>ໂຕະ:</strong> ${order.restaurant_tables?.table_number || '-'}</p>
                         <p><strong>ລູກຄ້າ:</strong> ${order.customer_name || '-'}</p>
                     </div>
+                    <div class="qr-code" id="receipt-qrcode"></div>
                     <div style="border-top: 1px dashed #000; margin: 10px 0;"></div>
                     <div class="items">
                         <div class="item"><strong>ລາຍການ</strong><strong>ລາຄາ</strong></div>
@@ -1470,6 +1471,11 @@ async function printReceipt(orderId) {
                     </div>
                 </div>
                 <script>
+                    new QRCode(document.getElementById("receipt-qrcode"), {
+                        text: "${order.order_number}",
+                        width: 120,
+                        height: 120
+                    });
                     setTimeout(() => {
                         window.print();
                         setTimeout(() => window.close(), 500);
@@ -1946,65 +1952,76 @@ async function printReceipt(orderId) {
         }
 
         async function submitOrder() {
-            const supabase = initSupabase();
-            const customerName = document.getElementById('customer_name')?.value || 'ລູກຄ້າ';
-            const customerPhone = document.getElementById('customer_phone')?.value;
-            const specialNotes = document.getElementById('special_notes')?.value;
-            const totalAmount = cart.reduce((sum, i) => sum + i.subtotal, 0);
-            const orderNumber = `ORD${Date.now()}`;
-            
-            showLoading();
-            try {
-                // Create order
-                const { data: order, error: orderError } = await supabase.from('orders').insert([{
-                    order_number: orderNumber,
-                    table_id: currentTableId,
-                    customer_name: customerName,
-                    customer_phone: customerPhone,
-                    order_type: 'dine_in',
-                    status: 'pending',
-                    special_instructions: specialNotes,
-                    total_amount: totalAmount
-                }]).select().single();
-                
-                if (orderError) throw orderError;
-                
-                // Create order items
-                const orderItems = cart.map(item => ({
-                    order_id: order.id,
-                    menu_item_id: item.id,
-                    menu_item_name: item.name,
-                    quantity: item.quantity,
-                    unit_price: item.price,
-                    subtotal: item.subtotal,
-                    status: 'pending'
-                }));
-                
-                const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
-                if (itemsError) throw itemsError;
-                
-                // Mark table as occupied
-                await supabase.from('restaurant_tables').update({ status: 'occupied' }).eq('id', currentTableId);
-                
-                hideLoading();
-                document.querySelector('.modal.show')?.remove();
-                closeCart();
-                cart = [];
-                updateCartUI();
-                
-                showToast('ສຳເລັດ', `ສັ່ງອາຫານສຳເລັດ! ເລກຄຳສັ່ງ: ${orderNumber}`, 'success');
-                
-                // Show order status
-                setTimeout(() => {
-                    alert(`ຄຳສັ່ງຂອງທ່ານຖືກສົ່ງໄປເຮືອນຄົວແລ້ວ\nເລກຄຳສັ່ງ: ${orderNumber}\nກະລຸນາລໍຖ້າພະນັກງານນຳສົ່ງອາຫານ`);
-                }, 500);
-                
-            } catch (error) {
-                hideLoading();
-                showToast('ຜິດພາດ', error.message, 'error');
-            }
+    const supabase = initSupabase();
+    const customerName = document.getElementById('customer_name')?.value || 'ລູກຄ້າ';
+    const customerPhone = document.getElementById('customer_phone')?.value;
+    const specialNotes = document.getElementById('special_notes')?.value;
+    const totalAmount = cart.reduce((sum, i) => sum + i.subtotal, 0);
+    const orderNumber = `ORD${Date.now()}`;
+    
+    console.log('Submitting order for table:', currentTableId);
+    
+    showLoading();
+    try {
+        // Create order
+        const { data: order, error: orderError } = await supabase.from('orders').insert([{
+            order_number: orderNumber,
+            table_id: currentTableId,
+            customer_name: customerName,
+            customer_phone: customerPhone,
+            order_type: 'dine_in',
+            status: 'pending',
+            special_instructions: specialNotes,
+            total_amount: totalAmount
+        }]).select().single();
+        
+        if (orderError) throw orderError;
+        
+        // Create order items
+        const orderItems = cart.map(item => ({
+            order_id: order.id,
+            menu_item_id: item.id,
+            menu_item_name: item.name,
+            quantity: item.quantity,
+            unit_price: item.price,
+            subtotal: item.subtotal,
+            status: 'pending'
+        }));
+        
+        const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
+        if (itemsError) throw itemsError;
+        
+        // Mark table as occupied (ສຳຄັນ!)
+        const { error: tableError, data: tableData } = await supabase
+            .from('restaurant_tables')
+            .update({ status: 'occupied' })
+            .eq('id', currentTableId)
+            .select();
+        
+        if (tableError) {
+            console.error('Table update error:', tableError);
+        } else {
+            console.log('Table updated:', tableData);
         }
-
+        
+        hideLoading();
+        document.querySelector('.modal.show')?.remove();
+        closeCart();
+        cart = [];
+        updateCartUI();
+        
+        showToast('ສຳເລັດ', `ສັ່ງອາຫານສຳເລັດ! ເລກຄຳສັ່ງ: ${orderNumber}`, 'success');
+        
+        setTimeout(() => {
+            alert(`ຄຳສັ່ງຂອງທ່ານຖືກສົ່ງໄປເຮືອນຄົວແລ້ວ\nເລກຄຳສັ່ງ: ${orderNumber}\nກະລຸນາລໍຖ້າພະນັກງານນຳສົ່ງອາຫານ`);
+        }, 500);
+        
+    } catch (error) {
+        hideLoading();
+        showToast('ຜິດພາດ', error.message, 'error');
+        console.error('Submit order error:', error);
+    }
+}
         // ============================================
         // HELPER FUNCTIONS
         // ============================================
