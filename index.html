@@ -907,6 +907,7 @@
                 items.push({ icon: 'fa-utensils', label: 'ເມນູອາຫານ', page: 'menu' });
                 items.push({ icon: 'fa-chair', label: 'ຈັດການໂຕະ', page: 'tables' });
                 items.push({ icon: 'fa-clipboard-list', label: 'ຄຳສັ່ງ', page: 'orders' });
+                items.push({ icon: 'fa-qrcode', label: 'ສະແກນ QR', page: 'scan' }); 
                 items.push({ icon: 'fa-chart-line', label: 'ລາຍງານ', page: 'reports' });
             }
             if (currentUser.role === 'kitchen' || currentUser.role === 'admin') {
@@ -935,7 +936,8 @@
                 'orders': 'ຄຳສັ່ງທັງໝົດ',
                 'reports': 'ລາຍງານ',
                 'kds': 'ຈໍສະແດງຜົນເຮືອນຄົວ (KDS)',
-                'staff': 'ຈັດການພະນັກງານ'
+                'staff': 'ຈັດການພະນັກງານ',
+                'scan': 'ສະແກນ QR' 
             };
             document.getElementById('page-title').textContent = titles[page] || 'ໜ້າຫຼັກ';
             
@@ -946,6 +948,7 @@
             else if (page === 'reports') await loadReports();
             else if (page === 'kds') await loadKDS();
             else if (page === 'staff') await loadStaffManagement();
+            else if (page === 'scan') await loadScanPage();
         }
 
         function updateTime() {
@@ -967,6 +970,146 @@
                 .subscribe();
         }
 
+        // ============================================
+// SCAN QR PAGE FOR CASHIER
+// ============================================
+async function loadScanPage() {
+    const content = document.getElementById('content-area');
+    content.innerHTML = `
+        <div class="data-table-container">
+            <div class="table-header">
+                <h3 class="table-title"><i class="fas fa-qrcode"></i> ສະແກນ QR ໃບຮັບເງິນ</h3>
+            </div>
+            <div style="padding: 24px; text-align: center;">
+                <div id="cashier-qr-reader" style="width: 100%; max-width: 500px; margin: 0 auto; display: none;"></div>
+                <div id="cashier-scan-result" style="margin-top: 20px;"></div>
+                <div class="empty-state" id="scan-instruction">
+                    <div class="empty-state-icon"><i class="fas fa-qrcode fa-3x"></i></div>
+                    <h3>ສະແກນ QR ໃບຮັບເງິນ</h3>
+                    <p>ກົດປຸ່ມ "ເປີດກ້ອງສະແກນ" ແລ້ວນຳ QR Code ຈາກໃບຮັບເງິນມາສະແກນ</p>
+                    <button class="btn btn-primary" onclick="startCashierQRScanner()">
+                        <i class="fas fa-camera"></i> ເປີດກ້ອງສະແກນ
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// ຟັງຊັນເປີດກ້ອງສະແກນ
+let cashierScanner = null;
+
+async function startCashierQRScanner() {
+    const readerDiv = document.getElementById('cashier-qr-reader');
+    const resultDiv = document.getElementById('cashier-scan-result');
+    const instructionDiv = document.getElementById('scan-instruction');
+    
+    // ສະແດງກ້ອງ ແລະ ປຸ່ມປິດ
+    readerDiv.style.display = 'block';
+    instructionDiv.style.display = 'none';
+    resultDiv.innerHTML = `
+        <div style="margin-bottom: 10px;">
+            <button class="btn btn-danger btn-sm" onclick="closeCashierScanner()">
+                <i class="fas fa-times"></i> ປິດກ້ອງ
+            </button>
+        </div>
+    `;
+    
+    cashierScanner = new Html5Qrcode('cashier-qr-reader');
+    
+    try {
+        await cashierScanner.start(
+            { facingMode: 'environment' },
+            { fps: 10, qrbox: { width: 300, height: 300 } },
+            async (decodedText) => {
+                // ເມື່ອສະແກນໄດ້
+                console.log('Scanned:', decodedText);
+                
+                // ປິດກ້ອງ
+                await closeCashierScanner();
+                
+                // ຄົ້ນຫາຄຳສັ່ງຈາກ QR (order_number)
+                const supabase = initSupabase();
+                const { data: order, error } = await supabase
+                    .from('orders')
+                    .select('*, restaurant_tables(table_number)')
+                    .eq('order_number', decodedText)
+                    .single();
+                
+                if (error || !order) {
+                    resultDiv.innerHTML = `
+                        <div style="background: var(--danger-light); color: var(--danger); padding: 15px; border-radius: 8px;">
+                            <i class="fas fa-exclamation-circle"></i> ບໍ່ພົບຄຳສັ່ງນີ້<br>
+                            <small>QR: ${decodedText}</small>
+                        </div>
+                    `;
+                    instructionDiv.style.display = 'block';
+                    return;
+                }
+                
+                // ສະແດງຂໍ້ມູນຄຳສັ່ງ
+                resultDiv.innerHTML = `
+                    <div style="background: var(--success-light); color: var(--success); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                        <i class="fas fa-check-circle"></i> ພົບຄຳສັ່ງ!
+                    </div>
+                    <div class="data-table-container">
+                        <table class="data-table">
+                            <tr><th>ເລກຄຳສັ່ງ</th><td>${order.order_number}</td></tr>
+                            <tr><th>ໂຕະ</th><td>ໂຕະ ${order.restaurant_tables?.table_number || '-'}</td></tr>
+                            <tr><th>ລູກຄ້າ</th><td>${order.customer_name || '-'}</td></tr>
+                            <tr><th>ຍອດລວມ</th><td>${formatCurrency(order.total_amount)}</td></tr>
+                            <tr><th>ສະຖານະ</th><td><span class="status-badge status-${order.status}">${getStatusLabel(order.status)}</span></td></tr>
+                        </table>
+                    </div>
+                    <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: center;">
+                        <button class="btn btn-primary" onclick="viewOrderDetail('${order.id}')">
+                            <i class="fas fa-eye"></i> ເບິ່ງລາຍລະອຽດ
+                        </button>
+                        ${order.status === 'completed' ? `<button class="btn btn-success" onclick="markAsPaid('${order.id}')">
+                            <i class="fas fa-money-bill"></i> ຊຳລະເງິນ
+                        </button>` : ''}
+                    </div>
+                `;
+                
+                showToast('ສຳເລັດ', `ພົບຄຳສັ່ງ ${order.order_number}`, 'success');
+            },
+            (error) => {
+                console.log('Scanning error:', error);
+            }
+        );
+    } catch (err) {
+        resultDiv.innerHTML = `
+            <div style="background: var(--danger-light); color: var(--danger); padding: 15px; border-radius: 8px;">
+                <i class="fas fa-exclamation-circle"></i> ບໍ່ສາມາດເປີດກ້ອງໄດ້<br>
+                <small>${err.message}</small>
+            </div>
+        `;
+        instructionDiv.style.display = 'block';
+        readerDiv.style.display = 'none';
+    }
+}
+
+// ຟັງຊັນປິດກ້ອງ (ໃຊ້ທັງປຸ່ມ ແລະ ອັດຕະໂນມັດ)
+async function closeCashierScanner() {
+    if (cashierScanner && cashierScanner.isScanning) {
+        await cashierScanner.stop();
+        cashierScanner = null;
+    }
+    const readerDiv = document.getElementById('cashier-qr-reader');
+    const instructionDiv = document.getElementById('scan-instruction');
+    if (readerDiv) readerDiv.style.display = 'none';
+    if (instructionDiv) instructionDiv.style.display = 'block';
+    const resultDiv = document.getElementById('cashier-scan-result');
+    if (resultDiv) resultDiv.innerHTML = '';
+}
+
+// ຟັງຊັນປິດກ້ອງເມື່ອປ່ຽນໜ້າ (ຕົວສຳຮອງ)
+function stopCashierScanner() {
+    if (cashierScanner && cashierScanner.isScanning) {
+        cashierScanner.stop().catch(err => console.log(err));
+        cashierScanner = null;
+    }
+}        
         // ============================================
         // DASHBOARD
         // ============================================
