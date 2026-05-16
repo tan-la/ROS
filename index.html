@@ -2609,7 +2609,10 @@ async function exportFinancialReport() {
         window.showAddStaffModal = showAddStaffModal;
         window.copyToClipboard = copyToClipboard;
         
-        async function editMenuItem(id) {
+        // ============================================
+// EDIT MENU ITEM WITH DELETE IMAGE BUTTON
+// ============================================
+async function editMenuItem(id) {
     const supabase = initSupabase();
     const { data: item } = await supabase.from('menu_items').select('*').eq('id', id).single();
     if (!item) return;
@@ -2625,7 +2628,17 @@ async function exportFinancialReport() {
                 <div class="form-group"><label>ລາຍລະອຽດ</label><textarea id="edit_description" rows="2">${item.description_lo || ''}</textarea></div>
                 <div class="form-group">
                     <label>ຮູບພາບປັດຈຸບັນ</label>
-                    <div>${item.image_url ? `<img src="${item.image_url}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 8px;">` : '<i class="fas fa-utensils"></i> ບໍ່ມີຮູບ'}</div>
+                    <div id="current-image-container">
+                        ${item.image_url ? 
+                            `<div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                                <img src="${item.image_url}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 8px;">
+                                <button type="button" class="btn btn-danger btn-sm" onclick="deleteCurrentImage('${id}', '${item.image_url}')">
+                                    <i class="fas fa-trash-alt"></i> ລຶບຮູບນີ້
+                                </button>
+                            </div>` : 
+                            '<span style="color:var(--gray-400);"><i class="fas fa-utensils"></i> ບໍ່ມີຮູບ</span>'
+                        }
+                    </div>
                 </div>
                 <div class="form-group">
                     <label>ປ່ຽນຮູບພາບ (ເລືອກໄຟລ໌ໃໝ່)</label>
@@ -2642,19 +2655,9 @@ async function exportFinancialReport() {
     document.body.appendChild(modal);
 }
 
-function previewEditImage(input) {
-    if (input.files && input.files[0]) {
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            const preview = document.getElementById('edit-image-preview');
-            if (preview) {
-                preview.innerHTML = `<img src="${e.target.result}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 8px;">`;
-            }
-        };
-        reader.readAsDataURL(input.files[0]);
-    }
-}
-
+// ============================================
+// UPDATE MENU ITEM WITH IMAGE
+// ============================================
 async function updateMenuItemWithImage(id) {
     const supabase = initSupabase();
     const name_lo = document.getElementById('edit_name_lo')?.value;
@@ -2674,16 +2677,79 @@ async function updateMenuItemWithImage(id) {
         if (image_url) {
             updateData.image_url = image_url;
         }
+        // ຖ້າບໍ່ມີຮູບໃໝ່, ບໍ່ຕ້ອງອັບເດດ image_url (ຮັກສາຮູບເກົ່າ)
         await supabase.from('menu_items').update(updateData).eq('id', id);
         hideLoading();
         document.querySelector('.modal.show')?.remove();
-        showToast('ສຳເລັດ', 'ອັບເດດສຳເລັດ');
+        showToast('ສຳເລັດ', 'ອັບເດດອາຫານສຳເລັດ');
         loadMenuManagement();
     } catch (error) {
         hideLoading();
         showToast('ຜິດພາດ', error.message, 'error');
     }
 }
+
+// ============================================
+// DELETE CURRENT IMAGE FUNCTION
+// ============================================
+async function deleteCurrentImage(itemId, imageUrl) {
+    if (!confirm('ທ່ານແນ່ໃຈບໍ່ວ່າຕ້ອງການລຶບຮູບພາບນີ້?')) return;
+    
+    showLoading();
+    try {
+        const supabase = initSupabase();
+        
+        // ລຶບຮູບຈາກ Storage
+        const urlParts = imageUrl.split('/');
+        const filePath = urlParts.slice(urlParts.indexOf('menu-images') + 1).join('/');
+        
+        if (filePath) {
+            const { error: storageError } = await supabase.storage
+                .from('menu-images')
+                .remove([filePath]);
+            
+            if (storageError) {
+                console.error('Storage delete error:', storageError);
+                // ສືບຕໍ່ເຖິງມີ error (ອາດຈະບໍ່ມີຮູບໃນ storage ແລ້ວ)
+            }
+        }
+        
+        // ລຶບ URL ຮູບອອກຈາກຖານຂໍ້ມູນ
+        const { error: updateError } = await supabase
+            .from('menu_items')
+            .update({ image_url: null })
+            .eq('id', itemId);
+        
+        if (updateError) throw updateError;
+        
+        // ປິດ modal ເກົ່າ
+        document.querySelector('.modal.show')?.remove();
+        
+        hideLoading();
+        showToast('ສຳເລັດ', 'ລຶບຮູບພາບສຳເລັດ');
+        
+        // ເປີດ edit modal ໃໝ່ເພື່ອສະແດງສະຖານະທີ່ອັບເດດ
+        editMenuItem(itemId);
+        
+    } catch (error) {
+        hideLoading();
+        showToast('ຜິດພາດ', error.message, 'error');
+    }
+}
+
+function previewEditImage(input) {
+    if (input.files && input.files[0]) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const preview = document.getElementById('edit-image-preview');
+            if (preview) {
+                preview.innerHTML = `<img src="${e.target.result}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 8px;">`;
+            }
+        };
+        reader.readAsDataURL(input.files[0]);
+    }
+}
+
         
         async function showAddCategoryModal() {
             const modal = document.createElement('div');
