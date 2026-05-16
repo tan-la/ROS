@@ -613,6 +613,11 @@ function subscribeToRealtime() {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items' }, () => {
             if (currentPage === 'kds') loadKDS();
         })
+        // FIX: subscribe to table status changes so the Tables page updates automatically
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'restaurant_tables' }, () => {
+            if (currentPage === 'tables')    loadTablesManagement();
+            if (currentPage === 'dashboard') loadDashboard();
+        })
         .subscribe();
 }
 
@@ -1312,7 +1317,7 @@ async function markAsPaid(orderId) {
     hideLoading();
 }
 
-// ===== VIEW ORDER DETAIL MODAL =====
+// ===== VIEW ORDER DETAIL MODAL (with item cancel + order cancel + table change) =====
 async function viewOrderDetail(orderId) {
     const supabase = initSupabase();
     showLoading();
@@ -1321,6 +1326,9 @@ async function viewOrderDetail(orderId) {
             .from('orders')
             .select('*, restaurant_tables(table_number), order_items(*, menu_items(name_lo))')
             .eq('id', orderId).single();
+
+        const canEdit = ['pending','confirmed'].includes(order.status); // only editable before cooking
+        const canCancel = !['paid','cancelled'].includes(order.status);
 
         const modal = document.createElement('div');
         modal.className = 'modal show';
@@ -1344,27 +1352,51 @@ async function viewOrderDetail(orderId) {
                         <div style="margin-top:4px;"><span class="status-badge status-${order.status}">${getStatusLabel(order.status)}</span></div>
                     </div>
                     <div class="form-group">
-                        <label>ລາຍການອາຫານ</label>
+                        <label>ລາຍການອາຫານ ${canEdit ? '<span style="font-size:0.75rem;color:var(--warning);font-weight:400;">(ກົດ ❌ ເພື່ອຍົກເລີກລາຍການ)</span>' : ''}</label>
                         <div style="border:1px solid var(--gray-200);border-radius:8px;overflow:hidden;">
-                            ${(order.order_items || []).map(item => `
-                                <div style="display:flex;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--gray-100);">
+                            ${(order.order_items || []).map(item => {
+                                const isCancelled = item.status === 'cancelled';
+                                return `
+                                <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--gray-100);${isCancelled ? 'opacity:0.4;text-decoration:line-through;background:var(--gray-50);' : ''}">
                                     <div>
                                         <strong>${item.menu_item_name || item.menu_items?.name_lo || '-'}</strong>
                                         <span style="color:var(--gray-500);"> × ${item.quantity}</span>
+                                        ${isCancelled ? '<span style="font-size:0.7rem;color:var(--danger);margin-left:6px;">ຍົກເລີກແລ້ວ</span>' : ''}
                                         ${item.special_instructions ? `<br><small style="color:var(--warning);"><i class="fas fa-comment"></i> ${item.special_instructions}</small>` : ''}
                                     </div>
-                                    <div style="font-weight:600;">${formatCurrency(item.subtotal)}</div>
-                                </div>`).join('')}
+                                    <div style="display:flex;align-items:center;gap:10px;">
+                                        <span style="font-weight:600;">${formatCurrency(item.subtotal)}</span>
+                                        ${canEdit && !isCancelled ? `
+                                        <button class="btn btn-danger btn-sm" onclick="cancelOrderItem('${item.id}','${order.id}',${item.subtotal})"
+                                            title="ຍົກເລີກລາຍການນີ້" style="padding:3px 8px;">
+                                            <i class="fas fa-times"></i>
+                                        </button>` : ''}
+                                    </div>
+                                </div>`;
+                            }).join('')}
                             <div style="display:flex;justify-content:space-between;padding:12px 14px;background:var(--gray-50);font-weight:700;">
                                 <span>ລວມທັງໝົດ</span>
-                                <span style="color:var(--primary);font-size:1.1rem;">${formatCurrency(order.total_amount)}</span>
+                                <span style="color:var(--primary);font-size:1.1rem;" id="order-total-display">${formatCurrency(order.total_amount)}</span>
                             </div>
                         </div>
                     </div>
                     ${order.special_instructions ? `<div class="form-group"><label>ໝາຍເຫດ</label><textarea readonly rows="2">${order.special_instructions}</textarea></div>` : ''}
+                    ${canEdit ? `
+                    <div class="form-group" style="background:var(--info-light);padding:12px;border-radius:8px;">
+                        <label style="color:var(--info);"><i class="fas fa-exchange-alt"></i> ຍ້າຍໂຕະ</label>
+                        <div style="display:flex;gap:8px;margin-top:6px;">
+                            <select id="change-table-select" style="flex:1;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-family:inherit;">
+                                <option value="">ເລືອກໂຕະໃໝ່...</option>
+                            </select>
+                            <button class="btn btn-warning btn-sm" onclick="changeOrderTable('${order.id}','${order.table_id}')">
+                                <i class="fas fa-exchange-alt"></i> ຍ້າຍ
+                            </button>
+                        </div>
+                    </div>` : ''}
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">ປິດ</button>
+                    ${canCancel ? `<button class="btn btn-danger" onclick="cancelWholeOrder('${order.id}','${order.table_id}')"><i class="fas fa-ban"></i> ຍົກເລີກຄຳສັ່ງ</button>` : ''}
                     ${order.status === 'confirmed' ? `<button class="btn btn-warning" onclick="startCooking('${order.id}')"><i class="fas fa-fire"></i> ເລີ່ມເຮັດ</button>` : ''}
                     ${order.status === 'cooking'   ? `<button class="btn btn-success" onclick="completeOrder('${order.id}')"><i class="fas fa-check"></i> ອາຫານສຳເລັດ</button>` : ''}
                     ${order.status === 'completed' ? `<button class="btn btn-primary" onclick="markAsPaid('${order.id}')"><i class="fas fa-money-bill"></i> ຊຳລະ</button>` : ''}
@@ -1372,6 +1404,103 @@ async function viewOrderDetail(orderId) {
                 </div>
             </div>`;
         document.body.appendChild(modal);
+
+        // Populate table change dropdown (exclude current table)
+        if (canEdit) {
+            const { data: allTables } = await supabase
+                .from('restaurant_tables').select('*').order('table_number');
+            const sel = document.getElementById('change-table-select');
+            if (sel && allTables) {
+                allTables
+                    .filter(t => t.id !== order.table_id)
+                    .forEach(t => {
+                        const opt = document.createElement('option');
+                        opt.value = t.id;
+                        opt.textContent = `ໂຕະ ${t.table_number} (${t.status === 'occupied' ? 'ມີລູກຄ້າ' : 'ຫວ່າງ'})`;
+                        sel.appendChild(opt);
+                    });
+            }
+        }
+    } catch (err) { showToast('ຜິດພາດ', err.message, 'error'); }
+    hideLoading();
+}
+
+// ===== CANCEL SINGLE ORDER ITEM =====
+async function cancelOrderItem(itemId, orderId, itemSubtotal) {
+    if (!confirm('ທ່ານຕ້ອງການຍົກເລີກລາຍການນີ້ແທ້ບໍ?')) return;
+    const supabase = initSupabase();
+    showLoading();
+    try {
+        // Mark item as cancelled
+        await supabase.from('order_items').update({ status: 'cancelled' }).eq('id', itemId);
+
+        // Recalculate order total from remaining active items
+        const { data: items } = await supabase
+            .from('order_items').select('subtotal, status').eq('order_id', orderId);
+        const newTotal = (items || [])
+            .filter(i => i.status !== 'cancelled')
+            .reduce((s, i) => s + (i.subtotal || 0), 0);
+
+        // If all items cancelled → cancel whole order and free table
+        const allCancelled = (items || []).every(i => i.status === 'cancelled');
+        if (allCancelled) {
+            const { data: ord } = await supabase.from('orders').select('table_id').eq('id', orderId).single();
+            await supabase.from('orders').update({ status: 'cancelled', total_amount: 0, cancelled_at: new Date().toISOString() }).eq('id', orderId);
+            if (ord?.table_id) await supabase.from('restaurant_tables').update({ status: 'available' }).eq('id', ord.table_id);
+            showToast('ແຈ້ງເຕືອນ', 'ຍົກເລີກທຸກລາຍການ — ຄຳສັ່ງຖືກຍົກເລີກ', 'warning');
+            document.querySelector('.modal.show')?.remove();
+        } else {
+            await supabase.from('orders').update({ total_amount: newTotal }).eq('id', orderId);
+            showToast('ສຳເລັດ', 'ຍົກເລີກລາຍການສຳເລັດ — ຍອດລວມອັບເດດແລ້ວ');
+            document.querySelector('.modal.show')?.remove();
+            viewOrderDetail(orderId); // re-open with updated data
+        }
+        loadAllOrders(currentOrdersPage);
+        if (currentPage === 'kds') loadKDS();
+    } catch (err) { showToast('ຜິດພາດ', err.message, 'error'); }
+    hideLoading();
+}
+
+// ===== CANCEL WHOLE ORDER =====
+async function cancelWholeOrder(orderId, tableId) {
+    if (!confirm('ທ່ານຕ້ອງການຍົກເລີກຄຳສັ່ງທັງໝົດແທ້ບໍ?')) return;
+    const supabase = initSupabase();
+    showLoading();
+    try {
+        await supabase.from('order_items').update({ status: 'cancelled' }).eq('order_id', orderId);
+        await supabase.from('orders').update({
+            status: 'cancelled',
+            total_amount: 0,
+            cancelled_at: new Date().toISOString()
+        }).eq('id', orderId);
+        // Free table
+        if (tableId) await supabase.from('restaurant_tables').update({ status: 'available' }).eq('id', tableId);
+        showToast('ສຳເລັດ', 'ຍົກເລີກຄຳສັ່ງ ແລະ ຄືນໂຕະສຳເລັດ', 'warning');
+        document.querySelector('.modal.show')?.remove();
+        loadAllOrders(currentOrdersPage);
+        if (currentPage === 'tables') loadTablesManagement();
+    } catch (err) { showToast('ຜິດພາດ', err.message, 'error'); }
+    hideLoading();
+}
+
+// ===== CHANGE TABLE =====
+async function changeOrderTable(orderId, oldTableId) {
+    const newTableId = document.getElementById('change-table-select')?.value;
+    if (!newTableId) { showToast('ແຈ້ງເຕືອນ', 'ກະລຸນາເລືອກໂຕະໃໝ່', 'warning'); return; }
+    if (!confirm('ທ່ານຕ້ອງການຍ້າຍໂຕະແທ້ບໍ?')) return;
+    const supabase = initSupabase();
+    showLoading();
+    try {
+        // Update order to new table
+        await supabase.from('orders').update({ table_id: newTableId }).eq('id', orderId);
+        // Free old table
+        if (oldTableId) await supabase.from('restaurant_tables').update({ status: 'available' }).eq('id', oldTableId);
+        // Occupy new table
+        await supabase.from('restaurant_tables').update({ status: 'occupied' }).eq('id', newTableId);
+        showToast('ສຳເລັດ', 'ຍ້າຍໂຕະສຳເລັດ');
+        document.querySelector('.modal.show')?.remove();
+        loadAllOrders(currentOrdersPage);
+        if (currentPage === 'tables') loadTablesManagement();
     } catch (err) { showToast('ຜິດພາດ', err.message, 'error'); }
     hideLoading();
 }
@@ -1515,6 +1644,9 @@ window.completeOrder         = completeOrder;
 window.loadKDS               = loadKDS;
 window.markItemComplete      = markItemComplete;
 window.markOrderComplete     = markOrderComplete;
+window.cancelOrderItem       = cancelOrderItem;
+window.cancelWholeOrder      = cancelWholeOrder;
+window.changeOrderTable      = changeOrderTable;
 
     // ===== PART 5 =====
 // ============================================
@@ -1790,53 +1922,89 @@ async function printReceipt(orderId) {
         const win = window.open('', '_blank');
         if (!win) { showToast('ແຈ້ງເຕືອນ', 'ກະລຸນາອະນຸຍາດ Pop-up ໃນ Browser', 'warning'); hideLoading(); return; }
 
-        win.document.write(`<!DOCTYPE html><html><head>
-        <meta charset="UTF-8">
-        <title>ໃບຮັບເງິນ - ${order.order_number}</title>
-        <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Lao&display=swap" rel="stylesheet">
-        <\/script>
-        <style>
-            body { font-family: 'Noto Sans Lao', monospace; padding: 20px; max-width: 350px; margin: 0 auto; font-size:13px; }
-            .receipt { border: 1px solid #ddd; padding: 20px; border-radius: 8px; }
-            .header { text-align: center; border-bottom: 1px dashed #000; padding-bottom: 10px; margin-bottom: 10px; }
-            .header h2 { margin: 0 0 4px; font-size: 18px; }
-            .row { display: flex; justify-content: space-between; margin: 4px 0; }
-            .items { margin: 10px 0; }
-            .total { border-top: 1px dashed #000; padding-top: 10px; margin-top: 10px; font-weight: bold; }
-            .footer { text-align: center; border-top: 1px dashed #000; padding-top: 10px; margin-top: 10px; font-size:11px; }
-            .signatures { display: flex; justify-content: space-between; margin-top: 24px; }
-            .sign { border-top: 1px solid #000; width: 120px; text-align: center; padding-top: 4px; font-size: 11px; }
-            #qr { text-align: center; margin: 12px 0; }
-        </style></head><body><div class="receipt">
-        <div class="header">
-            <h2>🍽 ຮ້ານອາຫານ</h2>
-            <div>ເລກ: <strong>${order.order_number}</strong></div>
-            <div>${new Date().toLocaleString('lo-LA')}</div>
-        </div>
-        <div>
-            <div class="row"><span>ໂຕະ:</span><span>${order.restaurant_tables?.table_number || '-'}</span></div>
-            <div class="row"><span>ລູກຄ້າ:</span><span>${order.customer_name || '-'}</span></div>
-        </div>
-        <div id="qr"></div>
-        <hr style="border:none;border-top:1px dashed #000;">
-        <div class="items">
-            <div class="row"><strong>ລາຍການ</strong><strong>ລາຄາ</strong></div>
-            ${(order.order_items || []).map(i => `
-                <div class="row">
-                    <span>${i.menu_item_name} × ${i.quantity}</span>
-                    <span>${new Intl.NumberFormat('lo-LA').format(i.subtotal)} ₭</span>
-                </div>`).join('')}
-        </div>
-        <div class="total">
-            <div class="row"><span>ລວມທັງໝົດ</span><span>${new Intl.NumberFormat('lo-LA').format(order.total_amount)} ₭</span></div>
-        </div>
-        <div class="footer"><p>ຂອບໃຈທີ່ໃຊ້ບໍລິການ</p><p>Thank you for dining with us! 🙏</p></div>
-        <div class="signatures"><div class="sign">ລູກຄ້າ</div><div class="sign">ພະນັກງານ</div></div>
-        </div>
-        
-            new QRCode(document.getElementById("qr"), { text: "${order.order_number}", width: 100, height: 100 });
-            setTimeout(() => { window.print(); setTimeout(() => window.close(), 800); }, 600);
-        <\/script></body></html>`);
+        // FIX: Build receipt HTML as a proper string — avoids script-tag escaping issues
+        const receiptItems = (order.order_items || []).map(i =>
+            `<div class="row"><span>${i.menu_item_name} × ${i.quantity}</span><span>${new Intl.NumberFormat('lo-LA').format(i.subtotal)} ₭</span></div>`
+        ).join('');
+
+        const receiptHTML = `<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<title>ໃບຮັບເງິນ - ${order.order_number}</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Lao&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></scr` + `ipt>
+<style>
+  @media print { body { margin: 0; } .no-print { display: none; } }
+  body { font-family: 'Noto Sans Lao', monospace; padding: 16px; max-width: 320px; margin: 0 auto; font-size: 13px; background: #fff; }
+  .receipt { border: 1px solid #ddd; padding: 16px; border-radius: 8px; }
+  .header { text-align: center; border-bottom: 1px dashed #000; padding-bottom: 10px; margin-bottom: 10px; }
+  .header h2 { margin: 0 0 4px; font-size: 17px; }
+  .header .order-num { font-weight: 700; font-size: 14px; }
+  .row { display: flex; justify-content: space-between; margin: 4px 0; }
+  .section { border-bottom: 1px dashed #ccc; margin: 8px 0; padding-bottom: 8px; }
+  .items { margin: 8px 0; }
+  .total { border-top: 2px dashed #000; padding-top: 10px; margin-top: 10px; font-weight: bold; font-size: 15px; }
+  .footer { text-align: center; border-top: 1px dashed #000; padding-top: 10px; margin-top: 10px; font-size: 11px; color: #555; }
+  .signatures { display: flex; justify-content: space-between; margin-top: 24px; }
+  .sign { border-top: 1px solid #000; width: 110px; text-align: center; padding-top: 4px; font-size: 11px; }
+  .qr-section { text-align: center; margin: 10px 0; }
+  .qr-label { font-size: 10px; color: #888; margin-top: 4px; }
+  .btn-print { display: block; margin: 12px auto; padding: 8px 24px; background: #e67e22; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="receipt">
+  <div class="header">
+    <h2>🍽 ຮ້ານອາຫານ</h2>
+    <div class="order-num">ເລກ: ${order.order_number}</div>
+    <div style="font-size:11px;color:#666;">${new Date().toLocaleString('lo-LA')}</div>
+  </div>
+
+  <div class="section">
+    <div class="row"><span>ໂຕະ:</span><strong>${order.restaurant_tables?.table_number || '-'}</strong></div>
+    <div class="row"><span>ລູກຄ້າ:</span><span>${order.customer_name || '-'}</span></div>
+    ${order.customer_phone ? `<div class="row"><span>ເບີໂທ:</span><span>${order.customer_phone}</span></div>` : ''}
+  </div>
+
+  <div class="items">
+    <div class="row" style="font-weight:700;border-bottom:1px solid #eee;padding-bottom:4px;margin-bottom:4px;">
+      <span>ລາຍການ</span><span>ລາຄາ</span>
+    </div>
+    ${receiptItems}
+  </div>
+
+  <div class="total">
+    <div class="row"><span>ລວມທັງໝົດ</span><span>${new Intl.NumberFormat('lo-LA').format(order.total_amount)} ₭</span></div>
+  </div>
+
+  <div class="qr-section">
+    <div id="receipt-qr"></div>
+    <div class="qr-label">ສະແກນ QR ເພື່ອຄົ້ນຫາໃບຮັບ</div>
+  </div>
+
+  <div class="footer">
+    <p>ຂອບໃຈທີ່ໃຊ້ບໍລິການ</p>
+    <p>Thank you for dining with us! 🙏</p>
+  </div>
+  <div class="signatures">
+    <div class="sign">ລູກຄ້າ</div>
+    <div class="sign">ພະນັກງານ</div>
+  </div>
+</div>
+<button class="btn-print no-print" onclick="window.print()">🖨 ພິມໃບຮັບ</button>
+<script>
+  window.onload = function() {
+    new QRCode(document.getElementById('receipt-qr'), {
+      text: '${order.order_number}',
+      width: 90, height: 90,
+      correctLevel: QRCode.CorrectLevel.M
+    });
+    setTimeout(function() { window.print(); }, 800);
+  };
+</scr` + `ipt>
+</body></html>`;
+
+        win.document.write(receiptHTML);
         win.document.close();
     } catch (err) { showToast('ຜິດພາດ', err.message, 'error'); }
     hideLoading();
