@@ -849,6 +849,41 @@
             if (!sbClient) sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
             return sbClient;
         }
+
+        // ============================================
+// UPLOAD IMAGE FUNCTION
+// ============================================
+async function uploadMenuItemImage(file) {
+    const supabase = initSupabase();
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}.${fileExt}`;
+    const filePath = `menu-items/${fileName}`;
+    
+    const { error } = await supabase.storage
+        .from('menu-images')
+        .upload(filePath, file);
+    
+    if (error) throw error;
+    
+    const { data: { publicUrl } } = supabase.storage
+        .from('menu-images')
+        .getPublicUrl(filePath);
+    
+    return publicUrl;
+}
+
+function previewImage(input) {
+    if (input.files && input.files[0]) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const preview = document.getElementById('image-preview');
+            if (preview) {
+                preview.innerHTML = `<img src="${e.target.result}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 8px;">`;
+            }
+        };
+        reader.readAsDataURL(input.files[0]);
+    }
+}    
         
         // ============================================
         // AUTHENTICATION
@@ -1206,17 +1241,24 @@ function stopCashierScanner() {
                                 <thead><tr><th>ລະຫັດ</th><th>ຊື່ອາຫານ</th><th>ໝວດໝູ່</th><th>ລາຄາ (₭)</th><th>ສະຖານະ</th><th>ຈັດການ</th></tr></thead>
                                 <tbody>
                                     ${menu?.map(item => `
-                                        <tr>
-                                            <td><code>${item.code || '-'}</code></td>
-                                            <td><strong>${item.name_lo}</strong></td>
-                                            <td>${item.categories?.name_lo || '-'}</td>
-                                            <td>${formatCurrency(item.price)}</td>
-                                            <td>${item.is_available ? '<span class="status-badge status-success">ພ້ອມ</span>' : '<span class="status-badge status-pending">ຢຸດ</span>'}</td>
-                                            <td><button class="btn btn-outline btn-sm" onclick="editMenuItem('${item.id}')"><i class="fas fa-edit"></i></button>
-                                                <button class="btn btn-danger btn-sm" onclick="toggleMenuItemStatus('${item.id}', ${!item.is_available})"><i class="fas ${item.is_available ? 'fa-ban' : 'fa-check'}"></i></button>
-                                            </td>
-                                        </tr>
-                                    `).join('')}
+    <tr style="border-bottom: 1px solid var(--gray-200);">
+        <td style="padding: 12px 16px;">
+            ${item.image_url ? 
+                `<img src="${item.image_url}" style="width: 40px; height: 40px; object-fit: cover; border-radius: 8px;">` : 
+                '<i class="fas fa-utensils" style="font-size: 24px; color: var(--gray-400);"></i>'
+            }
+        </td>
+        <td style="padding: 12px 16px;"><code>${item.code || '-'}</code></td>
+        <td style="padding: 12px 16px;"><strong>${item.name_lo}</strong></td>
+        <td style="padding: 12px 16px;">${item.categories?.name_lo || '-'}</td>
+        <td style="padding: 12px 16px;">${formatCurrency(item.price)}</td
+        <td style="padding: 12px 16px;">${item.is_available ? '<span class="status-badge status-success">ພ້ອມ</span>' : '<span class="status-badge status-pending">ຢຸດ</span>'}</td>
+        <td style="padding: 12px 16px;">
+            <button class="btn btn-outline btn-sm" onclick="editMenuItem('${item.id}')"><i class="fas fa-edit"></i></button>
+            <button class="btn btn-danger btn-sm" onclick="toggleMenuItemStatus('${item.id}', ${!item.is_available})"><i class="fas ${item.is_available ? 'fa-ban' : 'fa-check'}"></i></button>
+        </td
+    </tr>
+`).join('')}
                                 </tbody>
                             </table>
                         </div>
@@ -1229,65 +1271,78 @@ function stopCashierScanner() {
         }
 
         async function showAddMenuItemModal() {
-            const supabase = initSupabase();
-            const { data: categories } = await supabase.from('categories').select('*');
-            
-            const modal = document.createElement('div');
-            modal.className = 'modal show';
-            modal.innerHTML = `
-                <div class="modal-content">
-                    <div class="modal-header"><h3><i class="fas fa-plus-circle"></i> ເພີ່ມອາຫານໃໝ່</h3><button class="close-btn" onclick="this.closest(\'.modal\').remove()">&times;</button></div>
-                    <div class="modal-body">
-                        <div class="form-group"><label>ລະຫັດ</label><input type="text" id="item_code" placeholder="MENU001"></div>
-                        <div class="form-group"><label>ຊື່ອາຫານ (ລາວ) <span class="required">*</span></label><input type="text" id="item_name_lo"></div>
-                        <div class="form-group"><label>ໝວດໝູ່</label><select id="item_category">${categories?.map(c => `<option value="${c.id}">${c.name_lo}</option>`).join('')}</select></div>
-                        <div class="form-group"><label>ລາຄາ (₭)</label><input type="number" id="item_price" value="0"></div>
-                        <div class="form-group"><label>ລາຍລະອຽດ</label><textarea id="item_description" rows="2"></textarea></div>
-                        <div class="form-group"><label><input type="checkbox" id="item_recommended"> ອາຫານແນະນຳ</label></div>
-                    </div>
-                    <div class="modal-footer">
-                        <button class="btn btn-secondary" onclick="this.closest(\'.modal\').remove()">ຍົກເລີກ</button>
-                        <button class="btn btn-primary" onclick="saveMenuItem()">ບັນທຶກ</button>
-                    </div>
+    const supabase = initSupabase();
+    const { data: categories } = await supabase.from('categories').select('*');
+    
+    const modal = document.createElement('div');
+    modal.className = 'modal show';
+    modal.innerHTML = `
+        <div class="modal-content">
+            <div class="modal-header"><h3><i class="fas fa-plus-circle"></i> ເພີ່ມອາຫານໃໝ່</h3><button class="close-btn" onclick="this.closest(\'.modal\').remove()">&times;</button></div>
+            <div class="modal-body">
+                <div class="form-group"><label>ລະຫັດ</label><input type="text" id="item_code" placeholder="MENU001"></div>
+                <div class="form-group"><label>ຊື່ອາຫານ (ລາວ) <span class="required">*</span></label><input type="text" id="item_name_lo"></div>
+                <div class="form-group"><label>ໝວດໝູ່</label><select id="item_category">${categories?.map(c => `<option value="${c.id}">${c.name_lo}</option>`).join('')}</select></div>
+                <div class="form-group"><label>ລາຄາ (₭)</label><input type="number" id="item_price" value="0"></div>
+                <div class="form-group"><label>ລາຍລະອຽດ</label><textarea id="item_description" rows="2"></textarea></div>
+                <div class="form-group"><label><input type="checkbox" id="item_recommended"> ອາຫານແນະນຳ</label></div>
+                <div class="form-group">
+                    <label>ຮູບພາບອາຫານ</label>
+                    <input type="file" id="item_image" accept="image/*" onchange="previewImage(this)">
+                    <div id="image-preview" style="margin-top: 8px;"></div>
                 </div>
-            `;
-            document.body.appendChild(modal);
-        }
-
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="this.closest(\'.modal\').remove()">ຍົກເລີກ</button>
+                <button class="btn btn-primary" onclick="saveMenuItem()">ບັນທຶກ</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+        
         async function saveMenuItem() {
-            const supabase = initSupabase();
-            const code = document.getElementById('item_code')?.value;
-            const name_lo = document.getElementById('item_name_lo')?.value;
-            const category_id = document.getElementById('item_category')?.value;
-            const price = parseFloat(document.getElementById('item_price')?.value) || 0;
-            const description_lo = document.getElementById('item_description')?.value;
-            const is_recommended = document.getElementById('item_recommended')?.checked;
-            
-            if (!name_lo) {
-                showToast('ແຈ້ງເຕືອນ', 'ກະລຸນາປ້ອນຊື່ອາຫານ', 'error');
-                return;
-            }
-            
-            showLoading();
-            try {
-                await supabase.from('menu_items').insert([{
-                    code: code || `ITEM${Date.now()}`,
-                    name_lo,
-                    category_id,
-                    price,
-                    description_lo,
-                    is_recommended,
-                    is_available: true
-                }]);
-                hideLoading();
-                document.querySelector('.modal.show')?.remove();
-                showToast('ສຳເລັດ', 'ເພີ່ມອາຫານສຳເລັດ');
-                loadMenuManagement();
-            } catch (error) {
-                hideLoading();
-                showToast('ຜິດພາດ', error.message, 'error');
-            }
-        }
+    const supabase = initSupabase();
+    const code = document.getElementById('item_code')?.value;
+    const name_lo = document.getElementById('item_name_lo')?.value;
+    const category_id = document.getElementById('item_category')?.value;
+    const price = parseFloat(document.getElementById('item_price')?.value) || 0;
+    const description_lo = document.getElementById('item_description')?.value;
+    const is_recommended = document.getElementById('item_recommended')?.checked;
+    
+    // ອັບໂຫຼດຮູບພາບຖ້າມີ
+    let image_url = null;
+    const imageFile = document.getElementById('item_image')?.files[0];
+    if (imageFile) {
+        image_url = await uploadMenuItemImage(imageFile);
+    }
+    
+    if (!name_lo) {
+        showToast('ແຈ້ງເຕືອນ', 'ກະລຸນາປ້ອນຊື່ອາຫານ', 'error');
+        return;
+    }
+    
+    showLoading();
+    try {
+        await supabase.from('menu_items').insert([{
+            code: code || `ITEM${Date.now()}`,
+            name_lo,
+            category_id,
+            price,
+            description_lo,
+            is_recommended,
+            is_available: true,
+            image_url: image_url
+        }]);
+        hideLoading();
+        document.querySelector('.modal.show')?.remove();
+        showToast('ສຳເລັດ', 'ເພີ່ມອາຫານສຳເລັດ');
+        loadMenuManagement();
+    } catch (error) {
+        hideLoading();
+        showToast('ຜິດພາດ', error.message, 'error');
+    }
+}
 
         async function toggleMenuItemStatus(id, newStatus) {
             const supabase = initSupabase();
@@ -2215,29 +2270,34 @@ async function exportFinancialReport() {
         }
 
         function filterCustomerMenu(categoryId) {
-            let filtered = menuItems;
-            if (categoryId !== 'all') {
-                filtered = menuItems.filter(item => item.category_id === categoryId);
-            }
-            
-            const container = document.getElementById('customer-content');
-            container.innerHTML = `
-                <div class="menu-grid">
-                    ${filtered.map(item => `
-                        <div class="menu-card" onclick="addToCart('${item.id}', '${item.name_lo.replace(/'/g, "\\'")}', ${item.price})">
-                            <div class="menu-image"><i class="fas fa-utensils fa-3x" style="color:var(--gray-400);"></i></div>
-                            <div class="menu-info">
-                                <div class="menu-name">${item.name_lo}</div>
-                                <div class="menu-price">${formatCurrency(item.price)}</div>
-                                ${item.is_recommended ? '<span style="font-size:10px; background:var(--warning-light); padding:2px 6px; border-radius:10px;">ແນະນຳ</span>' : ''}
-                                ${item.description_lo ? `<div class="menu-description">${item.description_lo}</div>` : ''}
-                            </div>
-                        </div>
-                    `).join('')}
+    let filtered = menuItems;
+    if (categoryId !== 'all') {
+        filtered = menuItems.filter(item => item.category_id === categoryId);
+    }
+    
+    const container = document.getElementById('customer-content');
+    container.innerHTML = `
+        <div class="menu-grid">
+            ${filtered.map(item => `
+                <div class="menu-card" onclick="addToCart('${item.id}', '${item.name_lo.replace(/'/g, "\\'")}', ${item.price})">
+                    <div class="menu-image">
+                        ${item.image_url ? 
+                            `<img src="${item.image_url}" style="width: 100%; height: 100%; object-fit: cover;">` : 
+                            `<i class="fas fa-utensils fa-3x" style="color:var(--gray-400);"></i>`
+                        }
+                    </div>
+                    <div class="menu-info">
+                        <div class="menu-name">${item.name_lo}</div>
+                        <div class="menu-price">${formatCurrency(item.price)}</div>
+                        ${item.is_recommended ? '<span style="font-size:10px; background:var(--warning-light); padding:2px 6px; border-radius:10px;">ແນະນຳ</span>' : ''}
+                        ${item.description_lo ? `<div class="menu-description">${item.description_lo}</div>` : ''}
+                    </div>
                 </div>
-            `;
-        }
-
+            `).join('')}
+        </div>
+    `;
+}
+        
         function addToCart(id, name, price) {
             const existing = cart.find(item => item.id === id);
             if (existing) {
@@ -2535,47 +2595,80 @@ async function exportFinancialReport() {
         window.copyToClipboard = copyToClipboard;
         
         async function editMenuItem(id) {
-            const supabase = initSupabase();
-            const { data: item } = await supabase.from('menu_items').select('*').eq('id', id).single();
-            if (!item) return;
-            
-            const modal = document.createElement('div');
-            modal.className = 'modal show';
-            modal.innerHTML = `
-                <div class="modal-content">
-                    <div class="modal-header"><h3><i class="fas fa-edit"></i> ແກ້ໄຂອາຫານ</h3><button class="close-btn" onclick="this.closest(\'.modal\').remove()">&times;</button></div>
-                    <div class="modal-body">
-                        <div class="form-group"><label>ຊື່ອາຫານ (ລາວ)</label><input type="text" id="edit_name_lo" value="${item.name_lo}"></div>
-                        <div class="form-group"><label>ລາຄາ (₭)</label><input type="number" id="edit_price" value="${item.price}"></div>
-                        <div class="form-group"><label>ລາຍລະອຽດ</label><textarea id="edit_description" rows="2">${item.description_lo || ''}</textarea></div>
-                    </div>
-                    <div class="modal-footer">
-                        <button class="btn btn-secondary" onclick="this.closest(\'.modal\').remove()">ຍົກເລີກ</button>
-                        <button class="btn btn-primary" onclick="updateMenuItem('${id}')">ບັນທຶກ</button>
-                    </div>
+    const supabase = initSupabase();
+    const { data: item } = await supabase.from('menu_items').select('*').eq('id', id).single();
+    if (!item) return;
+    
+    const modal = document.createElement('div');
+    modal.className = 'modal show';
+    modal.innerHTML = `
+        <div class="modal-content">
+            <div class="modal-header"><h3><i class="fas fa-edit"></i> ແກ້ໄຂອາຫານ</h3><button class="close-btn" onclick="this.closest(\'.modal\').remove()">&times;</button></div>
+            <div class="modal-body">
+                <div class="form-group"><label>ຊື່ອາຫານ (ລາວ)</label><input type="text" id="edit_name_lo" value="${item.name_lo}"></div>
+                <div class="form-group"><label>ລາຄາ (₭)</label><input type="number" id="edit_price" value="${item.price}"></div>
+                <div class="form-group"><label>ລາຍລະອຽດ</label><textarea id="edit_description" rows="2">${item.description_lo || ''}</textarea></div>
+                <div class="form-group">
+                    <label>ຮູບພາບປັດຈຸບັນ</label>
+                    <div>${item.image_url ? `<img src="${item.image_url}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 8px;">` : '<i class="fas fa-utensils"></i> ບໍ່ມີຮູບ'}</div>
                 </div>
-            `;
-            document.body.appendChild(modal);
-        }
-        
-        async function updateMenuItem(id) {
-            const supabase = initSupabase();
-            const name_lo = document.getElementById('edit_name_lo')?.value;
-            const price = parseFloat(document.getElementById('edit_price')?.value) || 0;
-            const description_lo = document.getElementById('edit_description')?.value;
-            
-            showLoading();
-            try {
-                await supabase.from('menu_items').update({ name_lo, price, description_lo }).eq('id', id);
-                hideLoading();
-                document.querySelector('.modal.show')?.remove();
-                showToast('ສຳເລັດ', 'ອັບເດດສຳເລັດ');
-                loadMenuManagement();
-            } catch (error) {
-                hideLoading();
-                showToast('ຜິດພາດ', error.message, 'error');
+                <div class="form-group">
+                    <label>ປ່ຽນຮູບພາບ (ເລືອກໄຟລ໌ໃໝ່)</label>
+                    <input type="file" id="edit_item_image" accept="image/*" onchange="previewEditImage(this)">
+                    <div id="edit-image-preview" style="margin-top: 8px;"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="this.closest(\'.modal\').remove()">ຍົກເລີກ</button>
+                <button class="btn btn-primary" onclick="updateMenuItemWithImage('${id}')">ບັນທຶກ</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
+function previewEditImage(input) {
+    if (input.files && input.files[0]) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const preview = document.getElementById('edit-image-preview');
+            if (preview) {
+                preview.innerHTML = `<img src="${e.target.result}" style="width: 80px; height: 80px; object-fit: cover; border-radius: 8px;">`;
             }
+        };
+        reader.readAsDataURL(input.files[0]);
+    }
+}
+
+async function updateMenuItemWithImage(id) {
+    const supabase = initSupabase();
+    const name_lo = document.getElementById('edit_name_lo')?.value;
+    const price = parseFloat(document.getElementById('edit_price')?.value) || 0;
+    const description_lo = document.getElementById('edit_description')?.value;
+    
+    // ອັບໂຫຼດຮູບໃໝ່ຖ້າມີ
+    let image_url = null;
+    const imageFile = document.getElementById('edit_item_image')?.files[0];
+    if (imageFile) {
+        image_url = await uploadMenuItemImage(imageFile);
+    }
+    
+    showLoading();
+    try {
+        const updateData = { name_lo, price, description_lo };
+        if (image_url) {
+            updateData.image_url = image_url;
         }
+        await supabase.from('menu_items').update(updateData).eq('id', id);
+        hideLoading();
+        document.querySelector('.modal.show')?.remove();
+        showToast('ສຳເລັດ', 'ອັບເດດສຳເລັດ');
+        loadMenuManagement();
+    } catch (error) {
+        hideLoading();
+        showToast('ຜິດພາດ', error.message, 'error');
+    }
+}
         
         async function showAddCategoryModal() {
             const modal = document.createElement('div');
