@@ -1929,18 +1929,28 @@ async function printReceipt(orderId) {
         // CUSTOMER WEB APP (QR Ordering)
         // ============================================
         async function initCustomerApp(tableId) {
-            currentTableId = tableId;
-            currentOrderId = null;
-            cart = [];
-            
-            document.getElementById('login-page').style.display = 'none';
-            document.getElementById('main-app').style.display = 'none';
-            document.getElementById('customer-app').style.display = 'block';
-            document.getElementById('customer-table-info').innerHTML = `ໂຕະ: ${tableId.slice(-2)}`;
-            updateCartUI();
-            
-            await loadCustomerMenu();
-        }
+    currentTableId = tableId;
+    currentOrderId = null;
+    cart = [];
+    
+    // ດຶງເລກໂຕະຈາກຖານຂໍ້ມູນ
+    const supabase = initSupabase();
+    const { data: table } = await supabase
+        .from('restaurant_tables')
+        .select('table_number')
+        .eq('id', tableId)
+        .single();
+    
+    const tableNumber = table?.table_number || tableId.slice(-2);
+    
+    document.getElementById('login-page').style.display = 'none';
+    document.getElementById('main-app').style.display = 'none';
+    document.getElementById('customer-app').style.display = 'block';
+    document.getElementById('customer-table-info').innerHTML = `ໂຕະ: ${tableNumber}`;
+    updateCartUI();
+    
+    await loadCustomerMenu();
+}
 
         async function loadCustomerMenu() {
             const supabase = initSupabase();
