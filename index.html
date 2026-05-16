@@ -1378,7 +1378,10 @@ function stopCashierScanner() {
         // ============================================
         // ALL ORDERS (POS)
         // ============================================
-        async function loadAllOrders(page = 1) {
+        // ============================================
+// ALL ORDERS (POS) - CORRECT VERSION
+// ============================================
+async function loadAllOrders(page = 1) {
     const content = document.getElementById('content-area');
     showLoading();
     try {
@@ -1439,7 +1442,7 @@ function stopCashierScanner() {
                                     <td style="padding: 12px 16px;"><strong>${order.order_number || '-'}</strong></td>
                                     <td style="padding: 12px 16px;">ໂຕະ ${order.restaurant_tables?.table_number || '-'}</td>
                                     <td style="padding: 12px 16px;">${order.customer_name || 'ບໍ່ລະບຸ'}</td>
-                                    <td style="padding: 12px 16px;">${formatCurrency(order.total_amount)}</td
+                                    <td style="padding: 12px 16px; font-weight: bold; color: var(--primary);">${formatCurrency(order.total_amount)}</td
                                     <td style="padding: 12px 16px;"><span class="status-badge status-${order.status}">${getStatusLabel(order.status)}</span></td>
                                     <td style="padding: 12px 16px;">${formatDateTime(order.created_at)}</td
                                     <td style="padding: 12px 16px;">
@@ -1455,7 +1458,7 @@ function stopCashierScanner() {
                                         <h3>ບໍ່ມີຂໍ້ມູນຄຳສັ່ງ</h3>
                                         <p>ຍັງບໍ່ມີຄຳສັ່ງໃນລະບົບ</p>
                                     </td>
-                                </tr>
+                                  
                             `}
                         </tbody>
                     </table>
@@ -1493,7 +1496,6 @@ function stopCashierScanner() {
     }
     hideLoading();
 }
-
 // ຟັງຊັນປ່ຽນໜ້າ
 function changeOrdersPage(newPage) {
     if (newPage < 1) return;
@@ -1909,51 +1911,136 @@ async function printReceipt(orderId) {
         // ============================================
         // REPORTS
         // ============================================
-        async function loadReports() {
-            const content = document.getElementById('content-area');
-            showLoading();
-            try {
-                const supabase = initSupabase();
-                const { data: orders } = await supabase.from('orders').select('*').eq('status', 'paid');
-                
-                const totalRevenue = orders?.reduce((sum, o) => sum + (o.total_amount || 0), 0) || 0;
-                const todayRevenue = orders?.filter(o => o.paid_at?.startsWith(new Date().toISOString().split('T')[0]))
-                    .reduce((sum, o) => sum + (o.total_amount || 0), 0) || 0;
-                
-                content.innerHTML = `
-                    <div class="data-table-container">
-                        <div class="table-header">
-                            <h3 class="table-title"><i class="fas fa-chart-line"></i> ລາຍງານການເງິນ</h3>
-                        </div>
-                        <div class="dashboard-stats" style="padding:20px;">
-                            <div class="stat-card"><div class="stat-header"><span class="stat-label">ລາຍຮັບທັງໝົດ</span><div class="stat-icon"><i class="fas fa-chart-line"></i></div></div><div class="stat-value">${formatCurrency(totalRevenue)}</div></div>
-                            <div class="stat-card"><div class="stat-header"><span class="stat-label">ລາຍຮັບມື້ນີ້</span><div class="stat-icon"><i class="fas fa-calendar-day"></i></div></div><div class="stat-value">${formatCurrency(todayRevenue)}</div></div>
-                            <div class="stat-card"><div class="stat-header"><span class="stat-label">ຄຳສັ່ງທັງໝົດ</span><div class="stat-icon"><i class="fas fa-clipboard-list"></i></div></div><div class="stat-value">${orders?.length || 0}</div></div>
-                        </div>
-                        <div class="table-header"><h3 class="table-title">ປະຫວັດການຊຳລະ</h3></div>
-                        <div style="overflow-x:auto;">
-                            <table class="data-table">
-                                <thead><tr><th>ເລກຄຳສັ່ງ</th><th>ວັນທີ</th><th>ລູກຄ້າ</th><th>ຍອດລວມ</th></tr></thead>
-                                <tbody>
-                                    ${orders?.map(order => `
-                                        <tr>
-                                            <td>${order.order_number || '-'}</td>
-                                            <td>${formatDateTime(order.paid_at)}</td
-                                            <td>${order.customer_name || '-'}</td>
-                                            <td>${formatCurrency(order.total_amount)}</td
-                                        </tr>
-                                    `).join('')}
-                                </tbody>
-                            </table>
-                        </div>
+        // ============================================
+// REPORTS - FIXED VERSION
+// ============================================
+async function loadReports() {
+    const content = document.getElementById('content-area');
+    showLoading();
+    try {
+        const supabase = initSupabase();
+        const { data: orders } = await supabase
+            .from('orders')
+            .select('*, restaurant_tables(table_number)')
+            .eq('status', 'paid');
+        
+        const totalRevenue = orders?.reduce((sum, o) => sum + (o.total_amount || 0), 0) || 0;
+        const todayRevenue = orders?.filter(o => o.paid_at?.startsWith(new Date().toISOString().split('T')[0]))
+            .reduce((sum, o) => sum + (o.total_amount || 0), 0) || 0;
+        
+        content.innerHTML = `
+            <div class="data-table-container">
+                <div class="table-header">
+                    <h3 class="table-title"><i class="fas fa-chart-line"></i> ລາຍງານການເງິນ</h3>
+                    <div class="table-actions">
+                        <button class="btn btn-outline btn-sm" onclick="exportFinancialReport()">
+                            <i class="fas fa-download"></i> ສົ່ງອອກ Excel
+                        </button>
                     </div>
-                `;
-            } catch (error) {
-                content.innerHTML = `<div class="empty-state"><p>ເກີດຂໍ້ຜິດພາດ: ${error.message}</p></div>`;
-            }
-            hideLoading();
-        }
+                </div>
+                <div class="dashboard-stats" style="padding: 20px; margin: 0;">
+                    <div class="stat-card">
+                        <div class="stat-header">
+                            <span class="stat-label">ລາຍຮັບທັງໝົດ</span>
+                            <div class="stat-icon"><i class="fas fa-chart-line"></i></div>
+                        </div>
+                        <div class="stat-value">${formatCurrency(totalRevenue)}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-header">
+                            <span class="stat-label">ລາຍຮັບມື້ນີ້</span>
+                            <div class="stat-icon"><i class="fas fa-calendar-day"></i></div>
+                        </div>
+                        <div class="stat-value">${formatCurrency(todayRevenue)}</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-header">
+                            <span class="stat-label">ຄຳສັ່ງທັງໝົດ</span>
+                            <div class="stat-icon"><i class="fas fa-clipboard-list"></i></div>
+                        </div>
+                        <div class="stat-value">${orders?.length || 0}</div>
+                    </div>
+                </div>
+                <div class="table-header">
+                    <h3 class="table-title">ປະຫວັດການຊຳລະ</h3>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table class="data-table" style="width: 100%; border-collapse: collapse;">
+                        <thead>
+                            <tr style="background: var(--gray-100);">
+                                <th style="padding: 12px 16px; text-align: left;">ເລກຄຳສັ່ງ</th>
+                                <th style="padding: 12px 16px; text-align: left;">ໂຕະ</th>
+                                <th style="padding: 12px 16px; text-align: left;">ລູກຄ້າ</th>
+                                <th style="padding: 12px 16px; text-align: left;">ວັນທີ</th>
+                                <th style="padding: 12px 16px; text-align: left;">ຍອດລວມ</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${orders && orders.length > 0 ? orders.map(order => `
+                                <tr style="border-bottom: 1px solid var(--gray-200);">
+                                    <td style="padding: 12px 16px;"><strong>${order.order_number || '-'}</strong></td>
+                                    <td style="padding: 12px 16px;">ໂຕະ ${order.restaurant_tables?.table_number || '-'}</td>
+                                    <td style="padding: 12px 16px;">${order.customer_name || '-'}</td>
+                                    <td style="padding: 12px 16px;">${formatDateTime(order.paid_at || order.created_at)}</td
+                                    <td style="padding: 12px 16px; font-weight: bold; color: var(--primary);">${formatCurrency(order.total_amount)}</td
+                                  
+                            `).join('') : `
+                                <tr>
+                                    <td colspan="5" style="text-align: center; padding: 60px 20px;">
+                                        <div class="empty-state-icon"><i class="fas fa-chart-line fa-3x" style="color: var(--gray-400);"></i></div>
+                                        <h3>ບໍ່ມີຂໍ້ມູນລາຍງານການເງິນ</h3>
+                                        <p>ເມື່ອມີການຊຳລະເງິນ, ຂໍ້ມູນຈະສະແດງຢູ່ທີ່ນີ້</p>
+                                    </td>
+                                </tr>
+                            `}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+        
+    } catch (error) {
+        console.error('Load reports error:', error);
+        content.innerHTML = `<div class="empty-state"><p>ເກີດຂໍ້ຜິດພາດ: ${error.message}</p></div>`;
+    }
+    hideLoading();
+}
 
+// ຟັງຊັນສົ່ງອອກ Excel ສຳລັບລາຍງານການເງິນ
+async function exportFinancialReport() {
+    showLoading();
+    try {
+        const supabase = initSupabase();
+        const { data: orders } = await supabase
+            .from('orders')
+            .select('*, restaurant_tables(table_number)')
+            .eq('status', 'paid');
+        
+        if (!orders || orders.length === 0) {
+            showToast('ແຈ້ງເຕືອນ', 'ບໍ່ມີຂໍ້ມູນສຳລັບສົ່ງອອກ', 'warning');
+            hideLoading();
+            return;
+        }
+        
+        const exportData = orders.map(order => ({
+            'ເລກຄຳສັ່ງ': order.order_number,
+            'ໂຕະ': order.restaurant_tables?.table_number || '-',
+            'ລູກຄ້າ': order.customer_name || '-',
+            'ວັນທີຊຳລະ': formatDateTime(order.paid_at || order.created_at),
+            'ຍອດລວມ (₭)': order.total_amount || 0
+        }));
+        
+        const ws = XLSX.utils.json_to_sheet(exportData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Financial_Report');
+        XLSX.writeFile(wb, `financial_report_${new Date().toISOString().slice(0,19).replace(/:/g, '-')}.xlsx`);
+        
+        showToast('ສຳເລັດ', 'ສົ່ງອອກລາຍງານການເງິນສຳເລັດ');
+    } catch (error) {
+        showToast('ຜິດພາດ', error.message, 'error');
+    }
+    hideLoading();
+}
         // ============================================
         // STAFF MANAGEMENT
         // ============================================
