@@ -793,6 +793,10 @@
         let menuItems = [];
         let categories = [];
         let tables = [];
+        let currentOrdersPage = 1;
+        let ordersPerPage = 20;
+        let totalOrders = 0;
+        let allOrdersData = [];
 
         // ============================================
         // UTILITIES
@@ -1374,61 +1378,102 @@ function stopCashierScanner() {
         // ============================================
         // ALL ORDERS (POS)
         // ============================================
-        async function loadAllOrders() {
-            const content = document.getElementById('content-area');
-            showLoading();
-            try {
-                const supabase = initSupabase();
-                const { data: orders } = await supabase
-                    .from('orders')
-                    .select('*, restaurant_tables(table_number)')
-                    .order('created_at', { ascending: false });
-                
-                content.innerHTML = `
-                    <div class="data-table-container">
-                        <div class="table-header">
-                            <h3 class="table-title"><i class="fas fa-clipboard-list"></i> ລາຍການຄຳສັ່ງທັງໝົດ</h3>
-                            <div class="table-actions">
-                                <input type="text" id="order-search" class="search-input" placeholder="ຄົ້ນຫາ..." style="width:200px; padding:6px 12px;">
-                            </div>
-                        </div>
-                        <div style="overflow-x:auto;">
-                            <table class="data-table">
-                                <thead><tr><th>ເລກຄຳສັ່ງ</th><th>ໂຕະ</th><th>ລູກຄ້າ</th><th>ຍອດລວມ</th><th>ສະຖານະ</th><th>ເວລາ</th><th>ຈັດການ</th></tr></thead>
-                                <tbody>
-                                    ${orders?.map(order => `
-                                        <tr>
-                                            <td><strong>${order.order_number || '-'}</strong></td>
-                                            <td>ໂຕະ ${order.restaurant_tables?.table_number || '-'}</td>
-                                            <td>${order.customer_name || 'ບໍ່ລະບຸ'}</td>
-                                            <td>${formatCurrency(order.total_amount)}</td>
-                                            <td><span class="status-badge status-${order.status}">${getStatusLabel(order.status)}</span></td>
-                                            <td>${formatDateTime(order.created_at)}</td>
-                                            <td>
-                                                <button class="btn btn-success btn-sm" onclick="confirmOrder('${order.id}')" ${order.status !== 'pending' ? 'disabled' : ''}><i class="fas fa-check"></i></button>
-                                                <button class="btn btn-primary btn-sm" onclick="viewOrderDetail('${order.id}')"><i class="fas fa-eye"></i></button>
-                                                ${order.status === 'completed' ? `<button class="btn btn-primary btn-sm" onclick="markAsPaid('${order.id}')"><i class="fas fa-money-bill"></i></button>` : ''}
-                                            </td>
-                                        </tr>
-                                    `).join('')}
-                                </tbody>
-                            </table>
-                        </div>
+        async function loadAllOrders(page = 1) {
+    const content = document.getElementById('content-area');
+    showLoading();
+    try {
+        const supabase = initSupabase();
+        
+        // ນັບຈຳນວນທັງໝົດ
+        const { count: total, error: countError } = await supabase
+            .from('orders')
+            .select('*', { count: 'exact', head: true });
+        
+        if (countError) throw countError;
+        totalOrders = total;
+        
+        // ດຶງຂໍ້ມູນແບບແບ່ງໜ້າ
+        const start = (page - 1) * ordersPerPage;
+        const end = start + ordersPerPage - 1;
+        
+        const { data: orders, error } = await supabase
+            .from('orders')
+            .select('*, restaurant_tables(table_number)')
+            .order('created_at', { ascending: false })
+            .range(start, end);
+        
+        if (error) throw error;
+        
+        const totalPages = Math.ceil(totalOrders / ordersPerPage);
+        
+        content.innerHTML = `
+            <div class="data-table-container">
+                <div class="table-header">
+                    <h3 class="table-title"><i class="fas fa-clipboard-list"></i> ລາຍການຄຳສັ່ງທັງໝົດ</h3>
+                    <div class="table-actions">
+                        <input type="text" id="order-search" class="search-input" placeholder="ຄົ້ນຫາ..." style="width:200px; padding:6px 12px;">
                     </div>
-                `;
-                
-                document.getElementById('order-search')?.addEventListener('keyup', (e) => {
-                    const search = e.target.value.toLowerCase();
-                    document.querySelectorAll('#content-area .data-table tbody tr').forEach(row => {
-                        row.style.display = row.textContent.toLowerCase().includes(search) ? '' : 'none';
-                    });
-                });
-            } catch (error) {
-                content.innerHTML = `<div class="empty-state"><p>ເກີດຂໍ້ຜິດພາດ: ${error.message}</p></div>`;
-            }
-            hideLoading();
-        }
+                </div>
+                <div style="overflow-x:auto;">
+                    <table class="data-table">
+                        <thead>
+                            <tr><th>ເລກຄຳສັ່ງ</th><th>ໂຕະ</th><th>ລູກຄ້າ</th><th>ຍອດລວມ</th><th>ສະຖານະ</th><th>ເວລາ</th><th>ຈັດການ</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${orders?.map(order => `
+                                <tr>
+                                    <td><strong>${order.order_number || '-'}</strong></td>
+                                    <td>ໂຕະ ${order.restaurant_tables?.table_number || '-'}</td>
+                                    <td>${order.customer_name || 'ບໍ່ລະບຸ'}</td>
+                                    <td>${formatCurrency(order.total_amount)}</td
+                                    <td><span class="status-badge status-${order.status}">${getStatusLabel(order.status)}</span></td>
+                                    <td>${formatDateTime(order.created_at)}</td
+                                    <td>
+                                        <button class="btn btn-success btn-sm" onclick="confirmOrder('${order.id}')" ${order.status !== 'pending' ? 'disabled' : ''}><i class="fas fa-check"></i></button>
+                                        <button class="btn btn-primary btn-sm" onclick="viewOrderDetail('${order.id}')"><i class="fas fa-eye"></i></button>
+                                        ${order.status === 'completed' ? `<button class="btn btn-primary btn-sm" onclick="markAsPaid('${order.id}')"><i class="fas fa-money-bill"></i></button>` : ''}
+                                    </td
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="pagination" style="display: flex; justify-content: center; gap: 8px; padding: 16px;">
+                    <button class="btn btn-outline btn-sm" onclick="changeOrdersPage(${page - 1})" ${page === 1 ? 'disabled' : ''}>
+                        <i class="fas fa-chevron-left"></i> ກ່ອນໜ້າ
+                    </button>
+                    <span style="padding: 6px 12px;">ໜ້າ ${page} / ${totalPages} (ທັງໝົດ ${totalOrders} ລາຍການ)</span>
+                    <button class="btn btn-outline btn-sm" onclick="changeOrdersPage(${page + 1})" ${page === totalPages ? 'disabled' : ''}>
+                        ຕໍ່ໄປ <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        // ຟັງຊັນຄົ້ນຫາ
+        document.getElementById('order-search')?.addEventListener('keyup', (e) => {
+            const search = e.target.value.toLowerCase();
+            document.querySelectorAll('#content-area .data-table tbody tr').forEach(row => {
+                row.style.display = row.textContent.toLowerCase().includes(search) ? '' : 'none';
+            });
+        });
+        
+    } catch (error) {
+        content.innerHTML = `<div class="empty-state"><p>ເກີດຂໍ້ຜິດພາດ: ${error.message}</p></div>`;
+    }
+    hideLoading();
+}
 
+// ຟັງຊັນປ່ຽນໜ້າ
+function changeOrdersPage(newPage) {
+    if (newPage < 1) return;
+    const totalPages = Math.ceil(totalOrders / ordersPerPage);
+    if (newPage > totalPages) return;
+    currentOrdersPage = newPage;
+    loadAllOrders(currentOrdersPage);
+}
+        
         async function confirmOrder(orderId) {
     const supabase = initSupabase();
     showLoading();
