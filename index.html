@@ -375,7 +375,13 @@ let totalOrders        = 0;
 let currentReportsPage = 1;
 let reportsPerPage     = 20;
 let totalReports       = 0;
+        
+// Filter state for orders
+let currentOrderStatusFilter = 'all';  // ← ADD THIS
+let currentOrderDateFilter = '';       // ← ADD THIS
+let currentOrderSearchTerm = '';       // ← ADD THIS
 
+        
 // ============================================
 // SUPABASE INIT
 // ============================================
