@@ -2857,68 +2857,132 @@ function checkout() {
     document.body.appendChild(modal);
 }
 
-// ============================================
-// SUBMIT ORDER
+        // ============================================
+// SUBMIT ORDER (with add to existing order logic)
 // ============================================
 async function submitOrder() {
-    const supabase      = initSupabase();
-    const customerName  = document.getElementById('customer_name')?.value.trim() || 'ລູກຄ້າ';
+    if (cart.length === 0) {
+        showToast('ແຈ້ງເຕືອນ', 'ກະຕ່າຫວ່າງ', 'warning');
+        return;
+    }
+    
+    const supabase = initSupabase();
+    const customerName = document.getElementById('customer_name')?.value.trim() || 'ລູກຄ້າ';
     const customerPhone = document.getElementById('customer_phone')?.value.trim();
-    const specialNotes  = document.getElementById('special_notes')?.value.trim();
-    const totalAmount   = cart.reduce((s, i) => s + i.subtotal, 0);
-    const orderNumber   = `ORD${Date.now()}`;
-
+    const specialNotes = document.getElementById('special_notes')?.value.trim();
+    const totalAmount = cart.reduce((s, i) => s + i.subtotal, 0);
+    
     // Disable button to prevent double-submit
     const btn = document.getElementById('submit-order-btn');
     if (btn) btn.disabled = true;
-
+    
     showLoading();
+    
     try {
-        // 1. Create order
-        const { data: order, error: orderErr } = await supabase
-            .from('orders').insert([{
-                order_number:         orderNumber,
-                table_id:             currentTableId,
-                customer_name:        customerName,
-                customer_phone:       customerPhone,
-                order_type:           'dine_in',
-                status:               'pending',
-                special_instructions: specialNotes,
-                total_amount:         totalAmount
-            }]).select().single();
-
-        if (orderErr) throw orderErr;
-
-        // 2. Create order items (include special_instructions per item from note)
-        const orderItems = cart.map(item => ({
-            order_id:             order.id,
-            menu_item_id:         item.id,
-            menu_item_name:       item.name,
-            quantity:             item.quantity,
-            unit_price:           item.price,
-            subtotal:             item.subtotal,
-            status:               'pending',
-            special_instructions: item.note || null
-        }));
-
-        const { error: itemsErr } = await supabase.from('order_items').insert(orderItems);
-        if (itemsErr) throw itemsErr;
-
-        // 3. Update table status to occupied
-        const { error: tableErr } = await supabase
-            .from('restaurant_tables')
-            .update({ status: 'occupied' })
-            .eq('id', currentTableId);
-        if (tableErr) console.warn('Table status update failed:', tableErr.message);
-
-        // 4. Success — clear cart & show confirmation
+        // STEP 1: Check for existing PENDING order at this table
+        const { data: existingOrder, error: checkError } = await supabase
+            .from('orders')
+            .select('id, order_number, total_amount, status')
+            .eq('table_id', currentTableId)
+            .eq('status', 'pending')
+            .maybeSingle();  // Use maybeSingle to avoid error if no order found
+        
+        if (checkError && checkError.code !== 'PGRST116') throw checkError;
+        
+        let orderId;
+        let orderNumber;
+        
+        // STEP 2: If existing pending order found, ADD to it
+        if (existingOrder) {
+            orderId = existingOrder.id;
+            orderNumber = existingOrder.order_number;
+            
+            console.log('Adding to existing order:', orderNumber);
+            
+            // Add new items to existing order
+            const orderItems = cart.map(item => ({
+                order_id: orderId,
+                menu_item_id: item.id,
+                menu_item_name: item.name,
+                quantity: item.quantity,
+                unit_price: item.price,
+                subtotal: item.subtotal,
+                status: 'pending',
+                special_instructions: item.note || null
+            }));
+            
+            const { error: itemsErr } = await supabase.from('order_items').insert(orderItems);
+            if (itemsErr) throw itemsErr;
+            
+            // Update order total (old total + new total)
+            const newTotal = (existingOrder.total_amount || 0) + totalAmount;
+            const { error: updateError } = await supabase
+                .from('orders')
+                .update({ total_amount: newTotal })
+                .eq('id', orderId);
+            
+            if (updateError) throw updateError;
+            
+            showToast('ສຳເລັດ', `ເພີ່ມອາຫານໃສ່ຄຳສັ່ງ ${orderNumber} ສຳເລັດ`, 'success');
+            
+        } else {
+            // STEP 3: No existing order, create NEW order
+            orderNumber = `ORD${Date.now()}`;
+            
+            const { data: newOrder, error: orderErr } = await supabase
+                .from('orders')
+                .insert([{
+                    order_number: orderNumber,
+                    table_id: currentTableId,
+                    customer_name: customerName,
+                    customer_phone: customerPhone,
+                    order_type: 'dine_in',
+                    status: 'pending',
+                    special_instructions: specialNotes,
+                    total_amount: totalAmount
+                }])
+                .select()
+                .single();
+            
+            if (orderErr) throw orderErr;
+            
+            orderId = newOrder.id;
+            
+            // Create order items
+            const orderItems = cart.map(item => ({
+                order_id: orderId,
+                menu_item_id: item.id,
+                menu_item_name: item.name,
+                quantity: item.quantity,
+                unit_price: item.price,
+                subtotal: item.subtotal,
+                status: 'pending',
+                special_instructions: item.note || null
+            }));
+            
+            const { error: itemsErr } = await supabase.from('order_items').insert(orderItems);
+            if (itemsErr) throw itemsErr;
+            
+            // Update table status to occupied
+            const { error: tableErr } = await supabase
+                .from('restaurant_tables')
+                .update({ status: 'occupied' })
+                .eq('id', currentTableId);
+            
+            if (tableErr) console.warn('Table status update failed:', tableErr.message);
+            
+            showToast('ສຳເລັດ', `ສ້າງຄຳສັ່ງ ${orderNumber} ສຳເລັດ`, 'success');
+        }
+        
+        // Clear cart and close modal
         hideLoading();
         document.querySelector('.modal.show')?.remove();
         cart = [];
         updateCartUI();
-
+        
+        // Show confirmation
         showOrderConfirmation(orderNumber, totalAmount, customerName);
-
+        
     } catch (err) {
         hideLoading();
         if (btn) btn.disabled = false;
@@ -2926,7 +2990,7 @@ async function submitOrder() {
         console.error('submitOrder error:', err);
     }
 }
-
+        
 // ============================================
 // ORDER CONFIRMATION SCREEN
 // ============================================
