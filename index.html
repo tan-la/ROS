@@ -1876,12 +1876,14 @@ async function loadKDS() {
                             const activeItems = (order.order_items || []).filter(i => i.status !== 'cancelled');
                             const totalAmount = activeItems.reduce((sum, i) => sum + (i.subtotal || 0), 0);
                             const pendingItems = activeItems.filter(i => i.status !== 'completed');
+                            const hasNewItems = pendingItems.some(item => item.created_at && (Date.now() - new Date(item.created_at).getTime()) < 60000);
                             
                             return `
                                 <div class="kds-order-card" style="border-left-color:${borderColor};">
                                     <div class="kds-order-header">
                                         <div>
                                             <strong>${order.order_number}</strong>
+                                            ${hasNewItems ? '<span style="background:#ffc107; color:#856404; padding:2px 8px; border-radius:12px; font-size:0.7rem; margin-left:8px;">➕ ອາຫານໃໝ່</span>' : ''}
                                             <div style="font-size:0.8rem;color:var(--gray-500);">ໂຕະ ${order.restaurant_tables?.table_number || '-'}</div>
                                             <div style="font-size:0.8rem;font-weight:600;color:var(--primary);">ລວມ: ${formatCurrency(totalAmount)}</div>
                                         </div>
@@ -1891,19 +1893,26 @@ async function loadKDS() {
                                         </div>
                                     </div>
                                     <div class="kds-items">
-                                        ${pendingItems.length === 0
-                                            ? `<p style="text-align:center;color:var(--success);padding:8px;"><i class="fas fa-check-circle"></i> ທຸກລາຍການສຳເລັດ</p>`
-                                            : pendingItems.map(item => `
-                                                <div class="kds-item">
-                                                    <div>
-                                                        <strong>${item.menu_item_name}</strong>
-                                                        <span style="color:var(--gray-500);"> × ${item.quantity}</span>
-                                                        ${item.special_instructions ? `<br><small style="color:var(--warning);"><i class="fas fa-comment"></i> ${item.special_instructions}</small>` : ''}
-                                                    </div>
-                                                    <button class="btn btn-success btn-sm" onclick="markItemComplete('${item.id}','${order.id}')">
-                                                        <i class="fas fa-check"></i> ສຳເລັດ
-                                                    </button>
-                                                </div>`).join('')}
+                                    ${pendingItems.length === 0
+                            ? `<p style="text-align:center;color:var(--success);padding:8px;"><i class="fas fa-check-circle"></i> ທຸກລາຍການສຳເລັດ</p>`
+                            : pendingItems.map(item => {
+                            // Check if item was added within last 60 seconds using created_at
+                            const isNew = item.created_at && (Date.now() - new Date(item.created_at).getTime()) < 60000;
+                            const highlightStyle = isNew ? 'style="background: #fff3cd; border-left: 3px solid #ffc107; padding: 8px; margin: 4px 0; border-radius: 6px;"' : '';
+                            return `
+                            <div class="kds-item" ${highlightStyle}>
+                                <div>
+                            <strong>${item.menu_item_name}</strong>
+                            <span style="color:var(--gray-500);"> × ${item.quantity}</span>
+                            ${isNew ? '<span style="background:#ffc107; color:#856404; padding:2px 6px; border-radius:12px; font-size:0.7rem; margin-left:8px;">➕ ໃໝ່</span>' : ''}
+                            ${item.special_instructions ? `<br><small style="color:var(--warning);"><i class="fas fa-comment"></i> ${item.special_instructions}</small>` : ''}
+                                </div>
+                            <button class="btn btn-success btn-sm" onclick="markItemComplete('${item.id}','${order.id}')">
+                            <i class="fas fa-check"></i> ສຳເລັດ
+                            </button>
+                        </div>
+                        `;
+                        }).join('')}
                                     </div>
                                     <button class="btn btn-primary btn-sm" style="width:100%;margin-top:12px;" onclick="markOrderComplete('${order.id}')">
                                         <i class="fas fa-check-double"></i> ສຳເລັດທຸກລາຍການ
@@ -2856,9 +2865,9 @@ function checkout() {
         </div>`;
     document.body.appendChild(modal);
 }
-
-        // ============================================
-// SUBMIT ORDER (with add to existing order logic)
+        
+// ============================================
+// SUBMIT ORDER (Allow add-ons to pending/confirmed/cooking)
 // ============================================
 async function submitOrder() {
     if (cart.length === 0) {
@@ -2872,34 +2881,34 @@ async function submitOrder() {
     const specialNotes = document.getElementById('special_notes')?.value.trim();
     const totalAmount = cart.reduce((s, i) => s + i.subtotal, 0);
     
-    // Disable button to prevent double-submit
     const btn = document.getElementById('submit-order-btn');
     if (btn) btn.disabled = true;
-    
     showLoading();
     
     try {
-        // STEP 1: Check for existing PENDING order at this table
+        // Look for existing order with status pending, confirmed, or cooking
         const { data: existingOrder, error: checkError } = await supabase
             .from('orders')
             .select('id, order_number, total_amount, status')
             .eq('table_id', currentTableId)
-            .eq('status', 'pending')
-            .maybeSingle();  // Use maybeSingle to avoid error if no order found
+            .in('status', ['pending', 'confirmed', 'cooking'])
+            .maybeSingle();
         
         if (checkError && checkError.code !== 'PGRST116') throw checkError;
         
-        let orderId;
-        let orderNumber;
+        let orderId, orderNumber;
         
-        // STEP 2: If existing pending order found, ADD to it
+        // If existing order found, add to it
         if (existingOrder) {
             orderId = existingOrder.id;
             orderNumber = existingOrder.order_number;
             
-            console.log('Adding to existing order:', orderNumber);
+            // Show warning toast if order is confirmed or cooking
+            if (existingOrder.status === 'confirmed' || existingOrder.status === 'cooking') {
+                showToast('ແຈ້ງເຕືອນ', 'ອາຫານເພີ່ມເຕີມຈະຖືກສົ່ງໄປເຮືອນຄົວທັນທີ', 'warning');
+            }
             
-            // Add new items to existing order
+            // Insert new items with added_at timestamp (default now)
             const orderItems = cart.map(item => ({
                 order_id: orderId,
                 menu_item_id: item.id,
@@ -2907,28 +2916,23 @@ async function submitOrder() {
                 quantity: item.quantity,
                 unit_price: item.price,
                 subtotal: item.subtotal,
-                status: 'pending',
-                special_instructions: item.note || null
+                status: existingOrder.status === 'cooking' ? 'cooking' : 'pending', // match order status
+                special_instructions: item.note || null,
+                added_at: new Date().toISOString()  // explicit timestamp
             }));
             
             const { error: itemsErr } = await supabase.from('order_items').insert(orderItems);
             if (itemsErr) throw itemsErr;
             
-            // Update order total (old total + new total)
+            // Update order total
             const newTotal = (existingOrder.total_amount || 0) + totalAmount;
-            const { error: updateError } = await supabase
-                .from('orders')
-                .update({ total_amount: newTotal })
-                .eq('id', orderId);
-            
-            if (updateError) throw updateError;
+            await supabase.from('orders').update({ total_amount: newTotal }).eq('id', orderId);
             
             showToast('ສຳເລັດ', `ເພີ່ມອາຫານໃສ່ຄຳສັ່ງ ${orderNumber} ສຳເລັດ`, 'success');
             
         } else {
-            // STEP 3: No existing order, create NEW order
+            // Create new order
             orderNumber = `ORD${Date.now()}`;
-            
             const { data: newOrder, error: orderErr } = await supabase
                 .from('orders')
                 .insert([{
@@ -2945,10 +2949,8 @@ async function submitOrder() {
                 .single();
             
             if (orderErr) throw orderErr;
-            
             orderId = newOrder.id;
             
-            // Create order items
             const orderItems = cart.map(item => ({
                 order_id: orderId,
                 menu_item_id: item.id,
@@ -2957,30 +2959,24 @@ async function submitOrder() {
                 unit_price: item.price,
                 subtotal: item.subtotal,
                 status: 'pending',
-                special_instructions: item.note || null
+                special_instructions: item.note || null,
+                added_at: new Date().toISOString()
             }));
             
-            const { error: itemsErr } = await supabase.from('order_items').insert(orderItems);
-            if (itemsErr) throw itemsErr;
+            await supabase.from('order_items').insert(orderItems);
             
-            // Update table status to occupied
-            const { error: tableErr } = await supabase
-                .from('restaurant_tables')
+            // Update table status
+            await supabase.from('restaurant_tables')
                 .update({ status: 'occupied' })
                 .eq('id', currentTableId);
-            
-            if (tableErr) console.warn('Table status update failed:', tableErr.message);
             
             showToast('ສຳເລັດ', `ສ້າງຄຳສັ່ງ ${orderNumber} ສຳເລັດ`, 'success');
         }
         
-        // Clear cart and close modal
         hideLoading();
         document.querySelector('.modal.show')?.remove();
         cart = [];
         updateCartUI();
-        
-        // Show confirmation
         showOrderConfirmation(orderNumber, totalAmount, customerName);
         
     } catch (err) {
@@ -2990,7 +2986,6 @@ async function submitOrder() {
         console.error('submitOrder error:', err);
     }
 }
-        
 // ============================================
 // ORDER CONFIRMATION SCREEN
 // ============================================
