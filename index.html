@@ -503,6 +503,10 @@ async function login(email, password, role) {
         localStorage.setItem('restaurant_user', JSON.stringify(currentUser));
         hideLoading();
         showToast('ສຳເລັດ', `ຍິນດີຕ້ອນຮັບ, ${currentUser.name}`);
+        // Audit log login (after currentUser is set)
+        setTimeout(() => writeAuditLog('LOGIN', 'staff', currentUser.id, null,
+            { name: currentUser.name, role: currentUser.role, time: new Date().toISOString() }
+        ), 500);
         showMainApp();
         return true;
     } catch (err) {
@@ -538,6 +542,8 @@ function showMainApp() {
     updateTime();
     setInterval(updateTime, 1000);
     subscribeToRealtime();
+    // Check low stock badge for admin
+    if (currentUser.role === 'admin') setTimeout(checkLowStockBadge, 1000);
 }
 
 function buildNavigation() {
@@ -566,7 +572,10 @@ function buildNavigation() {
     }
     
     if (currentUser.role === 'admin') {
-        items.push({ icon: 'fa-users-cog', label: 'ຈັດການພະນັກງານ', page: 'staff' });
+        items.push({ icon: 'fa-users-cog',       label: 'ຈັດການພະນັກງານ', page: 'staff' });
+        items.push({ icon: 'fa-boxes',            label: 'ສະຕ໋ອກວັດຖຸດິບ',  page: 'stock' });
+        items.push({ icon: 'fa-tag',              label: 'ສ່ວນຫຼຸດ / ບັດ',   page: 'vouchers' });
+        items.push({ icon: 'fa-history',          label: 'Audit Log',        page: 'auditlog' });
     }
 
     items.forEach(item => {
@@ -592,7 +601,10 @@ async function loadPage(page) {
         reports:   'ລາຍງານ',
         kds:       'ຈໍສະແດງຜົນເຮືອນຄົວ (KDS)',
         staff:     'ຈັດການພະນັກງານ',
-        scan:      'ສະແກນ QR'
+        scan:      'ສະແກນ QR',
+        stock:     'ຈັດການສະຕ໋ອກວັດຖຸດິບ',
+        vouchers:  'ສ່ວນຫຼຸດ & ບັດກຳນົດ',
+        auditlog:  'ປະຫວັດການດຳເນີນງານ'
     };
     document.getElementById('page-title').textContent = titles[page] || page;
 
@@ -609,6 +621,9 @@ async function loadPage(page) {
     else if (page === 'kds')       await loadKDS();
     else if (page === 'staff')     await loadStaffManagement();
     else if (page === 'scan')      await loadScanPage();
+    else if (page === 'stock')     await loadStockManagement();
+    else if (page === 'vouchers')  await loadVoucherManagement();
+    else if (page === 'auditlog')  await loadAuditLog();
 }
         
 // ============================================
@@ -639,7 +654,35 @@ function subscribeToRealtime() {
             if (currentPage === 'tables')    loadTablesManagement();
             if (currentPage === 'dashboard') loadDashboard();
         })
+        // Low stock: refresh stock page if admin is viewing it
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'ingredients' }, () => {
+            if (currentPage === 'stock') loadStockManagement();
+            checkLowStockBadge();
+        })
         .subscribe();
+}
+
+// Show red badge on Stock nav item if any ingredients are low
+async function checkLowStockBadge() {
+    try {
+        const supabase = initSupabase();
+        const { data } = await supabase.from('ingredients').select('id, current_stock, minimum_stock');
+        const lowCount = (data || []).filter(i => i.current_stock <= i.minimum_stock).length;
+        const navLink  = document.getElementById('nav-stock');
+        if (!navLink) return;
+        let badge = navLink.querySelector('.stock-badge');
+        if (lowCount > 0) {
+            if (!badge) {
+                badge = document.createElement('span');
+                badge.className = 'stock-badge';
+                badge.style.cssText = 'margin-left:auto;background:var(--danger);color:white;border-radius:10px;padding:1px 7px;font-size:0.7rem;font-weight:700;';
+                navLink.appendChild(badge);
+            }
+            badge.textContent = lowCount;
+        } else if (badge) {
+            badge.remove();
+        }
+    } catch (_) {}
 }
         
 // ============================================
@@ -1500,6 +1543,8 @@ function changeOrdersPerPage() {
             .neq('status', 'cancelled');
         
         showToast('ສຳເລັດ', 'ຢືນຢັນຄຳສັ່ງ — ສົ່ງໄປຄົວແລ້ວ');
+        await writeAuditLog('CONFIRM_ORDER', 'orders', orderId,
+            { status: 'pending' }, { status: 'confirmed' });
         
         // Refresh views
         await loadAllOrders(currentOrdersPage);
@@ -1613,7 +1658,7 @@ async function viewOrderDetail(orderId) {
                     ${canCancel ? `<button class="btn btn-danger" onclick="cancelWholeOrder('${order.id}','${order.table_id}')"><i class="fas fa-ban"></i> ຍົກເລີກຄຳສັ່ງ</button>` : ''}
                     ${order.status === 'confirmed' ? `<button class="btn btn-warning" onclick="startCooking('${order.id}')"><i class="fas fa-fire"></i> ເລີ່ມເຮັດ</button>` : ''}
                     ${order.status === 'cooking'   ? `<button class="btn btn-success" onclick="completeOrder('${order.id}')"><i class="fas fa-check"></i> ອາຫານສຳເລັດ</button>` : ''}
-                    ${order.status === 'completed' ? `<button class="btn btn-primary" onclick="markAsPaid('${order.id}')"><i class="fas fa-money-bill"></i> ຊຳລະ</button>` : ''}
+                    ${order.status === 'completed' ? `<button class="btn btn-primary" onclick="showPaymentModal('${order.id}')"><i class="fas fa-cash-register"></i> ຊຳລະ</button>` : ''}
                     <button class="btn btn-outline" onclick="printReceipt('${order.id}')"><i class="fas fa-print"></i> ພິມ</button>
                 </div>
             </div>`;
@@ -1660,9 +1705,9 @@ async function cancelOrderItem(itemId, orderId, itemSubtotal) {
         
         if (orderError) throw orderError;
         
-        // Only allow cancellation for pending orders (before confirmation)
-        if (order.status !== 'pending') {
-            showToast('ແຈ້ງເຕືອນ', 'ສາມາດຍົກເລີກໄດ້ສະເພາະຄຳສັ່ງທີ່ຍັງບໍ່ທັນຢືນຢັນ', 'warning');
+        // Allow cancellation for pending AND confirmed (matches canEdit in viewOrderDetail)
+        if (!['pending', 'confirmed'].includes(order.status)) {
+            showToast('ແຈ້ງເຕືອນ', 'ສາມາດຍົກເລີກລາຍການໄດ້ສະເພາະຄຳສັ່ງ pending ຫຼື confirmed ເທົ່ານັ້ນ', 'warning');
             hideLoading();
             return;
         }
@@ -1713,6 +1758,8 @@ async function cancelOrderItem(itemId, orderId, itemSubtotal) {
             
             showToast('ສຳເລັດ', 'ຍົກເລີກຄຳສັ່ງທັງໝົດ', 'warning');
             document.querySelector('.modal.show')?.remove();
+            await writeAuditLog('CANCEL_ALL_ITEMS', 'orders', orderId,
+                { status: order.status }, { status: 'cancelled', reason: 'all items cancelled' });
             
         } else {
             // 5. Update order total
@@ -1722,6 +1769,9 @@ async function cancelOrderItem(itemId, orderId, itemSubtotal) {
                 .eq('id', orderId);
             
             if (updateTotalError) throw updateTotalError;
+            
+            await writeAuditLog('CANCEL_ITEM', 'order_items', itemId,
+                { status: 'pending' }, { status: 'cancelled', new_order_total: newTotal });
             
             showToast('ສຳເລັດ', `ຍົກເລີກລາຍການສຳເລັດ (ຍອດລວມໃໝ່: ${formatCurrency(newTotal)})`, 'success');
             
@@ -1755,6 +1805,8 @@ async function cancelWholeOrder(orderId, tableId) {
         }).eq('id', orderId);
         // Free table
         if (tableId) await supabase.from('restaurant_tables').update({ status: 'available' }).eq('id', tableId);
+        await writeAuditLog('CANCEL_ORDER', 'orders', orderId,
+            { status: 'pending' }, { status: 'cancelled' });
         showToast('ສຳເລັດ', 'ຍົກເລີກຄຳສັ່ງ ແລະ ຄືນໂຕະສຳເລັດ', 'warning');
         document.querySelector('.modal.show')?.remove();
         loadAllOrders(currentOrdersPage);
@@ -1823,7 +1875,8 @@ async function startCooking(orderId) {
     showLoading();
     try {
         await supabase.from('orders').update({ status: 'cooking' }).eq('id', orderId);
-        await supabase.from('order_items').update({ status: 'cooking' }).eq('order_id', orderId);
+        // FIX: Do not overwrite cancelled items
+        await supabase.from('order_items').update({ status: 'cooking' }).eq('order_id', orderId).neq('status', 'cancelled');
         showToast('ສຳເລັດ', 'ເລີ່ມເຮັດອາຫານ');
         document.querySelector('.modal.show')?.remove();
         loadKDS(); loadAllOrders(currentOrdersPage);
@@ -1835,9 +1888,9 @@ async function completeOrder(orderId) {
     const supabase = initSupabase();
     showLoading();
     try {
-        await supabase.from('order_items').update({ status: 'completed' }).eq('order_id', orderId);
+        // FIX: Only complete non-cancelled items
+        await supabase.from('order_items').update({ status: 'completed' }).eq('order_id', orderId).neq('status', 'cancelled');
         await supabase.from('orders').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', orderId);
-        showToast('ສຳເລັດ', 'ອາຫານສຳເລັດ — ພ້ອມສົ່ງ');
         document.querySelector('.modal.show')?.remove();
         loadKDS(); loadAllOrders(currentOrdersPage);
     } catch (err) { showToast('ຜິດພາດ', err.message, 'error'); }
@@ -1932,9 +1985,10 @@ async function markItemComplete(itemId, orderId) {
     try {
         await supabase.from('order_items').update({ status: 'completed' }).eq('id', itemId);
 
-        // Auto-complete order if all items done
+        // Auto-complete order if all ACTIVE (non-cancelled) items are done
         const { data: items } = await supabase.from('order_items').select('status').eq('order_id', orderId);
-        if (items?.every(i => i.status === 'completed')) {
+        const activeItems = (items || []).filter(i => i.status !== 'cancelled');
+        if (activeItems.length > 0 && activeItems.every(i => i.status === 'completed')) {
             await supabase.from('orders').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', orderId);
         }
         showToast('ສຳເລັດ', 'ອັບເດດລາຍການສຳເລັດ');
@@ -1947,7 +2001,8 @@ async function markOrderComplete(orderId) {
     const supabase = initSupabase();
     showLoading();
     try {
-        await supabase.from('order_items').update({ status: 'completed' }).eq('order_id', orderId);
+        // FIX: Only mark non-cancelled items as completed
+        await supabase.from('order_items').update({ status: 'completed' }).eq('order_id', orderId).neq('status', 'cancelled');
         await supabase.from('orders').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', orderId);
         showToast('ສຳເລັດ', 'ຄຳສັ່ງສຳເລັດທຸກລາຍການ');
         loadKDS();
@@ -2250,7 +2305,9 @@ async function printReceipt(orderId) {
         if (!win) { showToast('ແຈ້ງເຕືອນ', 'ກະລຸນາອະນຸຍາດ Pop-up ໃນ Browser', 'warning'); hideLoading(); return; }
 
         // FIX: Build receipt HTML as a proper string — avoids script-tag escaping issues
-        const receiptItems = (order.order_items || []).map(i =>
+        // FIX: Only show non-cancelled items on receipt
+        const activeOrderItems = (order.order_items || []).filter(i => i.status !== 'cancelled');
+        const receiptItems = activeOrderItems.map(i =>
             `<div class="row"><span>${i.menu_item_name} × ${i.quantity}</span><span>${new Intl.NumberFormat('lo-LA').format(i.subtotal)} ₭</span></div>`
         ).join('');
 
@@ -2301,7 +2358,14 @@ async function printReceipt(orderId) {
   </div>
 
   <div class="total">
+    ${order.original_amount && order.discount_amount > 0 ? `
+    <div class="row" style="font-size:12px;color:#555;"><span>ຍອດດັ່ງເດີມ</span><span>${new Intl.NumberFormat('lo-LA').format(order.original_amount)} ₭</span></div>
+    <div class="row" style="font-size:12px;color:green;"><span>ສ່ວນຫຼຸດ ${order.voucher_code ? '(' + order.voucher_code + ')' : ''}</span><span>- ${new Intl.NumberFormat('lo-LA').format(order.discount_amount)} ₭</span></div>` : ''}
     <div class="row"><span>ລວມທັງໝົດ</span><span>${new Intl.NumberFormat('lo-LA').format(order.total_amount)} ₭</span></div>
+    ${order.payment_method ? `<div class="row" style="font-size:12px;color:#555;margin-top:6px;"><span>ວິທີຊຳລະ</span><span>${order.payment_method === 'cash' ? 'ເງິນສົດ' : order.payment_method === 'qr' ? 'QR Pay' : 'ບັດ'}</span></div>` : ''}
+    ${order.payment_method === 'cash' && order.amount_received ? `
+    <div class="row" style="font-size:12px;color:#555;"><span>ຮັບເງິນ</span><span>${new Intl.NumberFormat('lo-LA').format(order.amount_received)} ₭</span></div>
+    <div class="row" style="font-size:12px;font-weight:bold;color:#27ae60;"><span>ເງິນທອນ</span><span>${new Intl.NumberFormat('lo-LA').format(order.change_amount || 0)} ₭</span></div>` : ''}
   </div>
 
   <div class="qr-section">
@@ -2463,7 +2527,7 @@ async function startCashierQRScanner() {
                     </div>
                     <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;justify-content:center;">
                         <button class="btn btn-primary" onclick="viewOrderDetail('${order.id}')"><i class="fas fa-eye"></i> ລາຍລະອຽດ</button>
-                        ${order.status === 'completed' ? `<button class="btn btn-success" onclick="markAsPaid('${order.id}')"><i class="fas fa-money-bill"></i> ຊຳລະ</button>` : ''}
+                        ${order.status === 'completed' ? `<button class="btn btn-success" onclick="showPaymentModal('${order.id}')"><i class="fas fa-cash-register"></i> ຊຳລະ</button>` : ''}
                         <button class="btn btn-outline" onclick="startCashierQRScanner()"><i class="fas fa-camera"></i> ສະແກນໃໝ່</button>
                     </div>`;
             },
@@ -3040,6 +3104,699 @@ window.openCart             = openCart;
 window.closeCart            = closeCart;
 window.checkout             = checkout;
 window.submitOrder          = submitOrder;
+
+// ============================================================
+// AUDIT LOG HELPER — call this after any important action
+// ============================================================
+async function writeAuditLog(action, tableName, recordId, oldData = null, newData = null) {
+    try {
+        if (!currentUser) return;
+        const supabase = initSupabase();
+        await supabase.from('audit_logs').insert([{
+            user_id:    currentUser.id,
+            user_name:  currentUser.name,
+            action,
+            table_name: tableName,
+            record_id:  String(recordId),
+            old_data:   oldData   ? oldData   : null,
+            new_data:   newData   ? newData   : null
+        }]);
+    } catch (e) {
+        console.warn('Audit log write failed (non-critical):', e.message);
+    }
+}
+
+// ============================================================
+// AUDIT LOG PAGE (Admin only)
+// ============================================================
+async function loadAuditLog() {
+    const content = document.getElementById('content-area');
+    showLoading();
+    try {
+        const supabase = initSupabase();
+        const { data: logs } = await supabase
+            .from('audit_logs')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(200);
+
+        content.innerHTML = `
+            <div class="data-table-container">
+                <div class="table-header">
+                    <h3 class="table-title"><i class="fas fa-history"></i> ປະຫວັດການດຳເນີນງານ</h3>
+                    <div class="table-actions">
+                        <input type="text" id="audit-search" class="search-input" placeholder="ຄົ້ນຫາ..." style="width:180px;" oninput="filterAuditLog(this.value)">
+                    </div>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table class="data-table" style="width:100%;">
+                        <thead>
+                            <tr><th>ເວລາ</th><th>ຜູ້ໃຊ້</th><th>ການດຳເນີນ</th><th>ຕາຕະລາງ</th><th>Record ID</th><th>ຂໍ້ມູນເກົ່າ</th><th>ຂໍ້ມູນໃໝ່</th></tr>
+                        </thead>
+                        <tbody id="audit-tbody">
+                            ${!logs || logs.length === 0
+                                ? `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--gray-400);">ຍັງບໍ່ມີ Log</td></tr>`
+                                : logs.map(l => `
+                                    <tr data-search="${(l.user_name||'').toLowerCase()} ${(l.action||'').toLowerCase()}">
+                                        <td style="font-size:0.75rem;white-space:nowrap;">${formatDateTime(l.created_at)}</td>
+                                        <td><strong>${l.user_name || '-'}</strong></td>
+                                        <td><span class="status-badge status-info" style="background:var(--info-light);color:var(--info);">${l.action || '-'}</span></td>
+                                        <td style="font-size:0.75rem;">${l.table_name || '-'}</td>
+                                        <td style="font-size:0.7rem;color:var(--gray-500);">${(l.record_id||'').slice(0,12)}...</td>
+                                        <td style="font-size:0.7rem;max-width:150px;overflow:hidden;">${l.old_data ? JSON.stringify(l.old_data).slice(0,60) : '-'}</td>
+                                        <td style="font-size:0.7rem;max-width:150px;overflow:hidden;">${l.new_data ? JSON.stringify(l.new_data).slice(0,60) : '-'}</td>
+                                    </tr>`).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>`;
+    } catch (err) {
+        content.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><p>${err.message}</p></div>`;
+    }
+    hideLoading();
+}
+
+function filterAuditLog(q) {
+    document.querySelectorAll('#audit-tbody tr[data-search]').forEach(row => {
+        row.style.display = row.dataset.search.includes(q.toLowerCase()) ? '' : 'none';
+    });
+}
+
+// ============================================================
+// VOUCHER MANAGEMENT
+// Supabase table needed:
+//   vouchers (id, code, type: 'percent'|'fixed', value, min_order_amount,
+//             max_uses, used_count, is_active, expires_at, description)
+// orders table needs: voucher_code text, discount_amount numeric, original_amount numeric
+// ============================================================
+async function loadVoucherManagement() {
+    const content = document.getElementById('content-area');
+    showLoading();
+    try {
+        const supabase = initSupabase();
+        const { data: vouchers } = await supabase
+            .from('vouchers').select('*').order('created_at', { ascending: false });
+
+        content.innerHTML = `
+            <div class="data-table-container">
+                <div class="table-header">
+                    <h3 class="table-title"><i class="fas fa-tag"></i> ສ່ວນຫຼຸດ & ບັດກຳນົດ</h3>
+                    <button class="btn btn-primary btn-sm" onclick="showAddVoucherModal()">
+                        <i class="fas fa-plus"></i> ສ້າງໂຄດໃໝ່
+                    </button>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table class="data-table" style="width:100%;">
+                        <thead>
+                            <tr><th>ໂຄດ</th><th>ປະເພດ</th><th>ມູນຄ່າ</th><th>ຂັ້ນຕໍ່າ</th><th>ໃຊ້ແລ້ວ/ທັງໝົດ</th><th>ໝົດອາຍຸ</th><th>ສະຖານະ</th><th>ຈັດການ</th></tr>
+                        </thead>
+                        <tbody>
+                            ${!vouchers || vouchers.length === 0
+                                ? `<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--gray-400);">ຍັງບໍ່ມີໂຄດ</td></tr>`
+                                : vouchers.map(v => {
+                                    const expired = v.expires_at && new Date(v.expires_at) < new Date();
+                                    const maxed   = v.max_uses && v.used_count >= v.max_uses;
+                                    const active  = v.is_active && !expired && !maxed;
+                                    return `
+                                    <tr>
+                                        <td><strong style="font-family:monospace;background:var(--gray-100);padding:2px 8px;border-radius:4px;">${v.code}</strong></td>
+                                        <td>${v.type === 'percent' ? '% ສ່ວນຫຼຸດ' : 'ຫຼຸດຄົງທີ່'}</td>
+                                        <td style="color:var(--success);font-weight:700;">${v.type === 'percent' ? v.value + '%' : formatCurrency(v.value)}</td>
+                                        <td>${formatCurrency(v.min_order_amount || 0)}</td>
+                                        <td>${v.used_count || 0} / ${v.max_uses || '∞'}</td>
+                                        <td style="font-size:0.8rem;">${v.expires_at ? formatDateTime(v.expires_at) : 'ບໍ່ໝົດອາຍຸ'}</td>
+                                        <td><span class="status-badge ${active ? 'status-success' : 'status-cancelled'}">${active ? 'ໃຊ້ໄດ້' : expired ? 'ໝົດອາຍຸ' : maxed ? 'ໃຊ້ຄົບ' : 'ປິດ'}</span></td>
+                                        <td>
+                                            <button class="btn btn-${v.is_active ? 'danger' : 'success'} btn-sm" onclick="toggleVoucher('${v.id}',${!v.is_active})">
+                                                <i class="fas fa-${v.is_active ? 'ban' : 'check'}"></i>
+                                            </button>
+                                        </td>
+                                    </tr>`;
+                                }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>`;
+    } catch (err) {
+        content.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><p>${err.message}</p></div>`;
+    }
+    hideLoading();
+}
+
+function showAddVoucherModal() {
+    const modal = document.createElement('div');
+    modal.className = 'modal show';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:500px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-tag"></i> ສ້າງໂຄດສ່ວນຫຼຸດ</h3>
+                <button class="close-btn" onclick="this.closest('.modal').remove()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>ໂຄດ <span class="required">*</span></label>
+                        <input type="text" id="v_code" placeholder="SAVE20" style="text-transform:uppercase;">
+                    </div>
+                    <div class="form-group">
+                        <label>ປະເພດ <span class="required">*</span></label>
+                        <select id="v_type" onchange="updateVoucherValueLabel()">
+                            <option value="percent">ເປີເຊັນ (%)</option>
+                            <option value="fixed">ຈຳນວນເງິນ (₭)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label id="v_value_label">ສ່ວນຫຼຸດ (%) <span class="required">*</span></label>
+                        <input type="number" id="v_value" min="1" placeholder="10">
+                    </div>
+                    <div class="form-group">
+                        <label>ຍອດຂັ້ນຕໍ່າ (₭)</label>
+                        <input type="number" id="v_min_order" min="0" value="0" placeholder="0">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>ຈຳນວນຄັ້ງທີ່ໃຊ້ໄດ້ (ໃສ່ 0 = ບໍ່ຈຳກັດ)</label>
+                        <input type="number" id="v_max_uses" min="0" value="0">
+                    </div>
+                    <div class="form-group">
+                        <label>ວັນໝົດອາຍຸ</label>
+                        <input type="datetime-local" id="v_expires_at">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>ລາຍລະອຽດ</label>
+                    <input type="text" id="v_description" placeholder="ສ່ວນຫຼຸດ 10% ສຳລັບລູກຄ້າໃໝ່">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">ຍົກເລີກ</button>
+                <button class="btn btn-primary" onclick="saveVoucher()"><i class="fas fa-save"></i> ບັນທຶກ</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+}
+
+function updateVoucherValueLabel() {
+    const type = document.getElementById('v_type')?.value;
+    const lbl  = document.getElementById('v_value_label');
+    if (lbl) lbl.textContent = type === 'percent' ? 'ສ່ວນຫຼຸດ (%) *' : 'ຈຳນວນຫຼຸດ (₭) *';
+}
+
+async function saveVoucher() {
+    const supabase = initSupabase();
+    const code     = document.getElementById('v_code')?.value.trim().toUpperCase();
+    const type     = document.getElementById('v_type')?.value;
+    const value    = parseFloat(document.getElementById('v_value')?.value) || 0;
+    const min_order_amount = parseFloat(document.getElementById('v_min_order')?.value) || 0;
+    const max_uses = parseInt(document.getElementById('v_max_uses')?.value) || null;
+    const expires_at = document.getElementById('v_expires_at')?.value || null;
+    const description = document.getElementById('v_description')?.value.trim();
+
+    if (!code || !value) { showToast('ແຈ້ງເຕືອນ', 'ກະລຸນາປ້ອນໂຄດ ແລະ ມູນຄ່າ', 'warning'); return; }
+    if (type === 'percent' && value > 100) { showToast('ແຈ້ງເຕືອນ', 'ເປີເຊັນຕ້ອງບໍ່ເກີນ 100', 'warning'); return; }
+    showLoading();
+    try {
+        await supabase.from('vouchers').insert([{
+            code, type, value, min_order_amount,
+            max_uses: max_uses || null,
+            expires_at: expires_at || null,
+            description, is_active: true, used_count: 0
+        }]);
+        await writeAuditLog('ADD_VOUCHER', 'vouchers', code, null, { code, type, value });
+        document.querySelector('.modal.show')?.remove();
+        showToast('ສຳເລັດ', `ສ້າງໂຄດ ${code} ສຳເລັດ`);
+        loadVoucherManagement();
+    } catch (err) { showToast('ຜິດພາດ', err.message, 'error'); }
+    hideLoading();
+}
+
+async function toggleVoucher(id, newStatus) {
+    const supabase = initSupabase();
+    await supabase.from('vouchers').update({ is_active: newStatus }).eq('id', id);
+    showToast('ສຳເລັດ', 'ປ່ຽນສະຖານະສຳເລັດ');
+    loadVoucherManagement();
+}
+
+// Validate voucher code — called from payment modal
+async function validateVoucher(code, orderTotal) {
+    if (!code) return null;
+    const supabase = initSupabase();
+    const { data: v } = await supabase.from('vouchers').select('*').eq('code', code.toUpperCase()).single();
+    if (!v || !v.is_active)                              { showToast('ຜິດພາດ', 'ໂຄດບໍ່ຖືກຕ້ອງ ຫຼື ໝົດອາຍຸ', 'error'); return null; }
+    if (v.expires_at && new Date(v.expires_at) < new Date()) { showToast('ຜິດພາດ', 'ໂຄດໝົດອາຍຸແລ້ວ', 'error'); return null; }
+    if (v.max_uses && v.used_count >= v.max_uses)        { showToast('ຜິດພາດ', 'ໂຄດຖືກໃຊ້ຄົບຈຳນວນແລ້ວ', 'error'); return null; }
+    if (v.min_order_amount && orderTotal < v.min_order_amount) {
+        showToast('ຜິດພາດ', `ຍອດສັ່ງຂັ້ນຕໍ່າ ${formatCurrency(v.min_order_amount)}`, 'error'); return null;
+    }
+    const discount = v.type === 'percent'
+        ? Math.min(orderTotal, orderTotal * (v.value / 100))
+        : Math.min(orderTotal, v.value);
+    showToast('ສຳເລັດ', `ໃຊ້ໂຄດ ${v.code} ຫຼຸດ ${formatCurrency(discount)}`, 'success');
+    return { ...v, discount_amount: Math.round(discount) };
+}
+
+// ============================================================
+// PAYMENT MODAL (Cash / QR Pay / Card + Change Calculator)
+// orders table needs: payment_method text, amount_received numeric, change_amount numeric
+// ============================================================
+async function showPaymentModal(orderId) {
+    const supabase = initSupabase();
+    showLoading();
+    const { data: order } = await supabase
+        .from('orders')
+        .select('*, restaurant_tables(table_number), order_items(*)')
+        .eq('id', orderId).single();
+    hideLoading();
+    if (!order) { showToast('ຜິດພາດ', 'ບໍ່ພົບຄຳສັ່ງ', 'error'); return; }
+
+    const activeItems  = (order.order_items || []).filter(i => i.status !== 'cancelled');
+    const originalTotal = activeItems.reduce((s, i) => s + (i.subtotal || 0), 0);
+
+    const modal = document.createElement('div');
+    modal.className = 'modal show';
+    modal.id = 'payment-modal';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:480px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-cash-register"></i> ຊຳລະເງິນ</h3>
+                <button class="close-btn" onclick="this.closest('.modal').remove()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- Order summary -->
+                <div style="background:var(--gray-50);border-radius:8px;padding:12px;margin-bottom:16px;">
+                    <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                        <span>ຄຳສັ່ງ:</span><strong>${order.order_number}</strong>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;">
+                        <span>ໂຕະ:</span><span>ໂຕະ ${order.restaurant_tables?.table_number || '-'}</span>
+                    </div>
+                </div>
+
+                <!-- Voucher -->
+                <div class="form-group">
+                    <label><i class="fas fa-tag"></i> ໂຄດສ່ວນຫຼຸດ</label>
+                    <div style="display:flex;gap:8px;">
+                        <input type="text" id="pay-voucher-code" placeholder="SAVE20" style="flex:1;padding:8px;border:1px solid var(--gray-300);border-radius:8px;font-family:inherit;text-transform:uppercase;">
+                        <button class="btn btn-outline btn-sm" onclick="applyPaymentVoucher(${originalTotal})">ກວດສອບ</button>
+                    </div>
+                    <div id="voucher-result" style="margin-top:6px;font-size:0.8rem;"></div>
+                </div>
+
+                <!-- Totals display -->
+                <div style="border:2px solid var(--gray-200);border-radius:8px;padding:12px;margin-bottom:16px;">
+                    <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                        <span>ຍອດດັ່ງເດີມ:</span>
+                        <span>${formatCurrency(originalTotal)}</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;margin-bottom:4px;color:var(--success);">
+                        <span>ສ່ວນຫຼຸດ:</span>
+                        <span id="discount-display">- 0 ₭</span>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;font-weight:700;font-size:1.1rem;border-top:1px dashed var(--gray-300);padding-top:8px;margin-top:8px;">
+                        <span>ຍອດຊຳລະ:</span>
+                        <span id="final-total-display" style="color:var(--primary);">${formatCurrency(originalTotal)}</span>
+                    </div>
+                </div>
+
+                <!-- Payment method -->
+                <div class="form-group">
+                    <label><i class="fas fa-credit-card"></i> ວິທີຊຳລະ</label>
+                    <div style="display:flex;gap:8px;">
+                        ${['cash','qr','card'].map(m => `
+                            <button class="btn btn-outline" id="pay-btn-${m}" onclick="selectPayMethod('${m}')"
+                                style="flex:1;flex-direction:column;padding:12px 8px;gap:6px;">
+                                <i class="fas fa-${m === 'cash' ? 'money-bill-wave' : m === 'qr' ? 'qrcode' : 'credit-card'}" style="font-size:1.25rem;"></i>
+                                <span style="font-size:0.75rem;">${m === 'cash' ? 'ເງິນສົດ' : m === 'qr' ? 'QR Pay' : 'ບັດ'}</span>
+                            </button>`).join('')}
+                    </div>
+                </div>
+
+                <!-- Cash change calculator (shown only for cash) -->
+                <div id="cash-section" style="display:none;">
+                    <div class="form-group">
+                        <label><i class="fas fa-hand-holding-usd"></i> ຮັບເງິນ (₭)</label>
+                        <input type="number" id="amount-received" min="0" placeholder="0"
+                            oninput="calcChange()"
+                            style="width:100%;padding:10px;border:2px solid var(--primary);border-radius:8px;font-size:1.1rem;font-family:inherit;font-weight:600;text-align:right;">
+                    </div>
+                    <div style="background:var(--success-light);border-radius:8px;padding:14px;text-align:center;">
+                        <div style="font-size:0.8rem;color:var(--gray-600);">ເງິນທອນ</div>
+                        <div id="change-display" style="font-size:1.75rem;font-weight:700;color:var(--success);">0 ₭</div>
+                    </div>
+                </div>
+
+                <input type="hidden" id="selected-pay-method" value="">
+                <input type="hidden" id="applied-discount" value="0">
+                <input type="hidden" id="applied-voucher-code" value="">
+                <input type="hidden" id="order-original-total" value="${originalTotal}">
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">ຍົກເລີກ</button>
+                <button class="btn btn-success" onclick="processPayment('${orderId}')">
+                    <i class="fas fa-check-circle"></i> ຢືນຢັນຊຳລະ
+                </button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+}
+
+function selectPayMethod(method) {
+    ['cash','qr','card'].forEach(m => {
+        const btn = document.getElementById(`pay-btn-${m}`);
+        if (btn) btn.style.cssText = m === method
+            ? 'flex:1;flex-direction:column;padding:12px 8px;gap:6px;background:var(--primary);color:white;border-color:var(--primary);'
+            : 'flex:1;flex-direction:column;padding:12px 8px;gap:6px;';
+    });
+    document.getElementById('selected-pay-method').value = method;
+    document.getElementById('cash-section').style.display = method === 'cash' ? 'block' : 'none';
+    if (method !== 'cash') { document.getElementById('change-display').textContent = '0 ₭'; }
+}
+
+function calcChange() {
+    const finalTotal = parseFloat(document.getElementById('final-total-display')?.textContent.replace(/[^0-9]/g,'')) || 0;
+    const received   = parseFloat(document.getElementById('amount-received')?.value) || 0;
+    const change     = Math.max(0, received - finalTotal);
+    const el = document.getElementById('change-display');
+    if (el) el.textContent = formatCurrency(change);
+    if (el) el.style.color = received < finalTotal ? 'var(--danger)' : 'var(--success)';
+}
+
+async function applyPaymentVoucher(originalTotal) {
+    const code   = document.getElementById('pay-voucher-code')?.value.trim();
+    const result = document.getElementById('voucher-result');
+    if (!code) return;
+    const voucher = await validateVoucher(code, originalTotal);
+    if (!voucher) { if (result) result.innerHTML = `<span style="color:var(--danger);">ໂຄດບໍ່ຖືກຕ້ອງ</span>`; return; }
+    const discount  = voucher.discount_amount;
+    const newTotal  = originalTotal - discount;
+    document.getElementById('applied-discount').value     = discount;
+    document.getElementById('applied-voucher-code').value = voucher.code;
+    document.getElementById('discount-display').textContent = `- ${formatCurrency(discount)}`;
+    document.getElementById('final-total-display').textContent = formatCurrency(newTotal);
+    if (result) result.innerHTML = `<span style="color:var(--success);"><i class="fas fa-check-circle"></i> ໂຄດ ${voucher.code}: ຫຼຸດ ${formatCurrency(discount)}</span>`;
+}
+
+async function processPayment(orderId) {
+    const method       = document.getElementById('selected-pay-method')?.value;
+    const discount     = parseFloat(document.getElementById('applied-discount')?.value) || 0;
+    const voucherCode  = document.getElementById('applied-voucher-code')?.value || null;
+    const originalTotal= parseFloat(document.getElementById('order-original-total')?.value) || 0;
+    const finalTotal   = originalTotal - discount;
+    const received     = parseFloat(document.getElementById('amount-received')?.value) || 0;
+    const change       = method === 'cash' ? Math.max(0, received - finalTotal) : 0;
+
+    if (!method) { showToast('ແຈ້ງເຕືອນ', 'ກະລຸນາເລືອກວິທີຊຳລະ', 'warning'); return; }
+    if (method === 'cash' && received < finalTotal) { showToast('ແຈ້ງເຕືອນ', 'ເງິນທີ່ຮັບໜ້ອຍກວ່າຍອດທີ່ຕ້ອງຊຳລະ', 'warning'); return; }
+
+    const supabase = initSupabase();
+    showLoading();
+    try {
+        // Update order with payment details
+        await supabase.from('orders').update({
+            status:          'paid',
+            paid_at:         new Date().toISOString(),
+            payment_method:  method,
+            amount_received: method === 'cash' ? received : finalTotal,
+            change_amount:   change,
+            discount_amount: discount,
+            voucher_code:    voucherCode,
+            original_amount: originalTotal,
+            total_amount:    finalTotal
+        }).eq('id', orderId);
+
+        // Free table
+        const { data: ord } = await supabase.from('orders').select('table_id').eq('id', orderId).single();
+        if (ord?.table_id) await supabase.from('restaurant_tables').update({ status: 'available' }).eq('id', ord.table_id);
+
+        // Increment voucher used_count
+        if (voucherCode) {
+            const { data: v } = await supabase.from('vouchers').select('id, used_count').eq('code', voucherCode).single();
+            if (v) await supabase.from('vouchers').update({ used_count: (v.used_count || 0) + 1 }).eq('id', v.id);
+        }
+
+        // Deduct stock
+        await deductStockForOrder(orderId);
+
+        // Audit log
+        await writeAuditLog('PAY_ORDER', 'orders', orderId,
+            { status: 'completed' },
+            { status: 'paid', method, finalTotal, discount, voucherCode }
+        );
+
+        document.querySelector('.modal.show')?.remove();
+        showToast('ສຳເລັດ', `ຊຳລະສຳເລັດ ${method === 'cash' ? `| ທອນ: ${formatCurrency(change)}` : ''}`);
+        await printReceipt(orderId);
+        loadAllOrders(currentOrdersPage);
+        if (currentPage === 'dashboard') loadDashboard();
+    } catch (err) { showToast('ຜິດພາດ', err.message, 'error'); }
+    hideLoading();
+}
+
+// ============================================================
+// STOCK MANAGEMENT
+// Supabase tables needed:
+//   ingredients (id, name, unit, current_stock, minimum_stock, cost_per_unit, is_active)
+//   menu_item_ingredients (id, menu_item_id, ingredient_id, quantity_used)
+// ============================================================
+async function loadStockManagement() {
+    const content = document.getElementById('content-area');
+    showLoading();
+    try {
+        const supabase = initSupabase();
+        const { data: ingredients } = await supabase
+            .from('ingredients').select('*').order('name');
+
+        const lowStock = (ingredients || []).filter(i => i.current_stock <= i.minimum_stock);
+
+        content.innerHTML = `
+            <div class="data-table-container">
+                <div class="table-header">
+                    <h3 class="table-title"><i class="fas fa-boxes"></i> ສະຕ໋ອກວັດຖຸດິບ</h3>
+                    <div class="table-actions">
+                        <button class="btn btn-primary btn-sm" onclick="showAddIngredientModal()"><i class="fas fa-plus"></i> ເພີ່ມວັດຖຸດິບ</button>
+                    </div>
+                </div>
+                ${lowStock.length > 0 ? `
+                <div style="background:var(--danger-light);border-left:4px solid var(--danger);padding:12px 16px;display:flex;align-items:center;gap:10px;">
+                    <i class="fas fa-exclamation-triangle" style="color:var(--danger);font-size:1.25rem;"></i>
+                    <div>
+                        <strong style="color:var(--danger);">ແຈ້ງເຕືອນ: ${lowStock.length} ລາຍການສະຕ໋ອກໃກ້ໝົດ!</strong>
+                        <div style="font-size:0.8rem;color:var(--gray-600);">${lowStock.map(i => i.name).join(', ')}</div>
+                    </div>
+                </div>` : `
+                <div style="background:var(--success-light);border-left:4px solid var(--success);padding:10px 16px;font-size:0.875rem;color:var(--success);">
+                    <i class="fas fa-check-circle"></i> ສະຕ໋ອກທັງໝົດຢູ່ໃນລະດັບປົກກະຕິ
+                </div>`}
+                <div style="overflow-x:auto;">
+                    <table class="data-table" style="width:100%;">
+                        <thead>
+                            <tr><th>ຊື່</th><th>ໜ່ວຍ</th><th>ສະຕ໋ອກປັດຈຸບັນ</th><th>ຂັ້ນຕໍ່າ</th><th>ລາຄາ/ໜ່ວຍ</th><th>ສະຖານະ</th><th>ຈັດການ</th></tr>
+                        </thead>
+                        <tbody>
+                            ${!ingredients || ingredients.length === 0
+                                ? `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--gray-400);">ຍັງບໍ່ມີວັດຖຸດິບ</td></tr>`
+                                : ingredients.map(ing => {
+                                    const isLow = ing.current_stock <= ing.minimum_stock;
+                                    return `
+                                    <tr style="${isLow ? 'background:var(--danger-light);' : ''}">
+                                        <td><strong>${ing.name}</strong></td>
+                                        <td>${ing.unit}</td>
+                                        <td style="font-weight:700;color:${isLow ? 'var(--danger)' : 'var(--success)'};">${ing.current_stock}</td>
+                                        <td style="color:var(--gray-500);">${ing.minimum_stock}</td>
+                                        <td>${formatCurrency(ing.cost_per_unit || 0)}</td>
+                                        <td><span class="status-badge ${isLow ? 'status-cancelled' : 'status-success'}">${isLow ? 'ໃກ້ໝົດ' : 'ປົກກະຕິ'}</span></td>
+                                        <td>
+                                            <button class="btn btn-primary btn-sm" onclick="showRestockModal('${ing.id}','${ing.name}',${ing.current_stock})">
+                                                <i class="fas fa-plus-circle"></i> ເຕີມ
+                                            </button>
+                                        </td>
+                                    </tr>`;
+                                }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>`;
+    } catch (err) {
+        content.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><p>${err.message}</p></div>`;
+    }
+    hideLoading();
+}
+
+function showAddIngredientModal() {
+    const modal = document.createElement('div');
+    modal.className = 'modal show';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:480px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-plus"></i> ເພີ່ມວັດຖຸດິບ</h3>
+                <button class="close-btn" onclick="this.closest('.modal').remove()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group"><label>ຊື່ວັດຖຸດິບ <span class="required">*</span></label><input type="text" id="ing_name" placeholder="ຊີ້ນໝູ"></div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>ໜ່ວຍ</label>
+                        <select id="ing_unit">
+                            <option value="kg">kg (ກິໂລ)</option>
+                            <option value="g">g (ກຣາມ)</option>
+                            <option value="L">L (ລິດ)</option>
+                            <option value="ml">ml (ມິນລີລິດ)</option>
+                            <option value="pcs">pcs (ອັນ)</option>
+                            <option value="pack">pack (ຊອງ)</option>
+                        </select>
+                    </div>
+                    <div class="form-group"><label>ສະຕ໋ອກເລີ່ມຕົ້ນ</label><input type="number" id="ing_stock" min="0" value="0"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>ສະຕ໋ອກຂັ້ນຕໍ່າ (ແຈ້ງເຕືອນ)</label><input type="number" id="ing_min" min="0" value="1"></div>
+                    <div class="form-group"><label>ລາຄາ/ໜ່ວຍ (₭)</label><input type="number" id="ing_cost" min="0" value="0"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">ຍົກເລີກ</button>
+                <button class="btn btn-primary" onclick="saveIngredient()"><i class="fas fa-save"></i> ບັນທຶກ</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+}
+
+async function saveIngredient() {
+    const supabase = initSupabase();
+    const name = document.getElementById('ing_name')?.value.trim();
+    if (!name) { showToast('ແຈ້ງເຕືອນ', 'ກະລຸນາປ້ອນຊື່ວັດຖຸດິບ', 'warning'); return; }
+    showLoading();
+    try {
+        await supabase.from('ingredients').insert([{
+            name,
+            unit:          document.getElementById('ing_unit')?.value,
+            current_stock: parseFloat(document.getElementById('ing_stock')?.value) || 0,
+            minimum_stock: parseFloat(document.getElementById('ing_min')?.value) || 1,
+            cost_per_unit: parseFloat(document.getElementById('ing_cost')?.value) || 0,
+            is_active: true
+        }]);
+        await writeAuditLog('ADD_INGREDIENT', 'ingredients', name, null, { name });
+        document.querySelector('.modal.show')?.remove();
+        showToast('ສຳເລັດ', 'ເພີ່ມວັດຖຸດິບສຳເລັດ');
+        loadStockManagement();
+    } catch (err) { showToast('ຜິດພາດ', err.message, 'error'); }
+    hideLoading();
+}
+
+function showRestockModal(id, name, currentStock) {
+    const modal = document.createElement('div');
+    modal.className = 'modal show';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:380px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-plus-circle"></i> ເຕີມສະຕ໋ອກ: ${name}</h3>
+                <button class="close-btn" onclick="this.closest('.modal').remove()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="color:var(--gray-600);margin-bottom:16px;">ສະຕ໋ອກປັດຈຸບັນ: <strong>${currentStock}</strong></p>
+                <div class="form-group">
+                    <label>ຈຳນວນທີ່ເຕີມ <span class="required">*</span></label>
+                    <input type="number" id="restock-qty" min="0.1" step="0.1" value="1" placeholder="0">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">ຍົກເລີກ</button>
+                <button class="btn btn-success" onclick="restockIngredient('${id}','${name}',${currentStock})">
+                    <i class="fas fa-plus-circle"></i> ເຕີມ
+                </button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+}
+
+async function restockIngredient(id, name, currentStock) {
+    const supabase = initSupabase();
+    const qty = parseFloat(document.getElementById('restock-qty')?.value) || 0;
+    if (qty <= 0) { showToast('ແຈ້ງເຕືອນ', 'ກະລຸນາປ້ອນຈຳນວນທີ່ຖືກຕ້ອງ', 'warning'); return; }
+    showLoading();
+    try {
+        const newStock = currentStock + qty;
+        await supabase.from('ingredients').update({ current_stock: newStock }).eq('id', id);
+        await writeAuditLog('RESTOCK', 'ingredients', id,
+            { current_stock: currentStock },
+            { current_stock: newStock, added: qty }
+        );
+        document.querySelector('.modal.show')?.remove();
+        showToast('ສຳເລັດ', `ເຕີມ ${name} +${qty} ສຳເລັດ (ໃໝ່: ${newStock})`);
+        loadStockManagement();
+    } catch (err) { showToast('ຜິດພາດ', err.message, 'error'); }
+    hideLoading();
+}
+
+// Deduct stock when order is paid
+async function deductStockForOrder(orderId) {
+    try {
+        const supabase = initSupabase();
+        const { data: items } = await supabase
+            .from('order_items')
+            .select('menu_item_id, quantity, status')
+            .eq('order_id', orderId)
+            .neq('status', 'cancelled');
+
+        for (const item of (items || [])) {
+            const { data: recipes } = await supabase
+                .from('menu_item_ingredients')
+                .select('ingredient_id, quantity_used')
+                .eq('menu_item_id', item.menu_item_id);
+
+            for (const recipe of (recipes || [])) {
+                const deduct = recipe.quantity_used * item.quantity;
+                // Use RPC or read-then-write (read first to log)
+                const { data: ing } = await supabase
+                    .from('ingredients').select('id, name, current_stock').eq('id', recipe.ingredient_id).single();
+                if (!ing) continue;
+                const newStock = Math.max(0, (ing.current_stock || 0) - deduct);
+                await supabase.from('ingredients').update({ current_stock: newStock }).eq('id', ing.id);
+
+                // Low stock alert
+                const { data: ingFull } = await supabase
+                    .from('ingredients').select('minimum_stock').eq('id', ing.id).single();
+                if (ingFull && newStock <= ingFull.minimum_stock) {
+                    showToast('⚠ ສະຕ໋ອກໃກ້ໝົດ', `${ing.name}: ເຫຼືອ ${newStock} ໜ່ວຍ`, 'warning');
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('Stock deduction failed (non-critical):', e.message);
+    }
+}
+
+// ============================================================
+// UPGRADE markAsPaid → use showPaymentModal instead
+// ============================================================
+async function markAsPaid(orderId) {
+    // Close any open detail modal first, then show payment modal
+    document.querySelector('.modal.show')?.remove();
+    await showPaymentModal(orderId);
+}
+
+// ============================================================
+// GLOBAL EXPORTS for new features
+// ============================================================
+window.loadAuditLog            = loadAuditLog;
+window.filterAuditLog          = filterAuditLog;
+window.loadVoucherManagement   = loadVoucherManagement;
+window.showAddVoucherModal     = showAddVoucherModal;
+window.updateVoucherValueLabel = updateVoucherValueLabel;
+window.saveVoucher             = saveVoucher;
+window.toggleVoucher           = toggleVoucher;
+window.showPaymentModal        = showPaymentModal;
+window.selectPayMethod         = selectPayMethod;
+window.calcChange              = calcChange;
+window.applyPaymentVoucher     = applyPaymentVoucher;
+window.processPayment          = processPayment;
+window.loadStockManagement     = loadStockManagement;
+window.showAddIngredientModal  = showAddIngredientModal;
+window.saveIngredient          = saveIngredient;
+window.showRestockModal        = showRestockModal;
+window.restockIngredient       = restockIngredient;
 
     </script>
 </body>
