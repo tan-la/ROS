@@ -1385,10 +1385,10 @@ async function viewOrderDetail(orderId) {
                     <div class="form-group" style="background:var(--info-light);padding:12px;border-radius:8px;">
                         <label style="color:var(--info);"><i class="fas fa-exchange-alt"></i> ຍ້າຍໂຕະ</label>
                         <div style="display:flex;gap:8px;margin-top:6px;">
-                            <select id="change-table-select" style="flex:1;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-family:inherit;">
+                            <select id="change-table-select-${order.id}" style="flex:1;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-family:inherit;">
                                 <option value="">ເລືອກໂຕະໃໝ່...</option>
                             </select>
-                            <button class="btn btn-warning btn-sm" onclick="changeOrderTable('${order.id}','${order.table_id}')">
+                            <button class="btn btn-warning btn-sm" onclick="changeOrderTable('${order.id}','${order.table_id}','${order.id}')">
                                 <i class="fas fa-exchange-alt"></i> ຍ້າຍ
                             </button>
                         </div>
@@ -1409,8 +1409,9 @@ async function viewOrderDetail(orderId) {
         if (canEdit) {
             const { data: allTables } = await supabase
                 .from('restaurant_tables').select('*').order('table_number');
-            const sel = document.getElementById('change-table-select');
+            const sel = document.getElementById(`change-table-select-${order.id}`);
             if (sel && allTables) {
+                sel.innerHTML = '<option value="">ເລືອກໂຕະໃໝ່...</option>';
                 allTables
                     .filter(t => t.id !== order.table_id)
                     .forEach(t => {
@@ -1421,46 +1422,90 @@ async function viewOrderDetail(orderId) {
                     });
             }
         }
-    } catch (err) { showToast('ຜິດພາດ', err.message, 'error'); }
+    } catch (err) { 
+        showToast('ຜິດພາດ', err.message, 'error'); 
+    }
     hideLoading();
 }
-
 // ===== CANCEL SINGLE ORDER ITEM =====
 async function cancelOrderItem(itemId, orderId, itemSubtotal) {
     if (!confirm('ທ່ານຕ້ອງການຍົກເລີກລາຍການນີ້ແທ້ບໍ?')) return;
+    
     const supabase = initSupabase();
     showLoading();
     try {
         // Mark item as cancelled
-        await supabase.from('order_items').update({ status: 'cancelled' }).eq('id', itemId);
+        const { error: updateError } = await supabase
+            .from('order_items')
+            .update({ status: 'cancelled' })
+            .eq('id', itemId);
+        
+        if (updateError) throw updateError;
 
-        // Recalculate order total from remaining active items
-        const { data: items } = await supabase
-            .from('order_items').select('subtotal, status').eq('order_id', orderId);
+        // Get all items for this order
+        const { data: items, error: itemsError } = await supabase
+            .from('order_items')
+            .select('subtotal, status')
+            .eq('order_id', orderId);
+        
+        if (itemsError) throw itemsError;
+
+        // Calculate new total from active items (not cancelled)
         const newTotal = (items || [])
             .filter(i => i.status !== 'cancelled')
             .reduce((s, i) => s + (i.subtotal || 0), 0);
 
         // If all items cancelled → cancel whole order and free table
         const allCancelled = (items || []).every(i => i.status === 'cancelled');
+        
         if (allCancelled) {
-            const { data: ord } = await supabase.from('orders').select('table_id').eq('id', orderId).single();
-            await supabase.from('orders').update({ status: 'cancelled', total_amount: 0, cancelled_at: new Date().toISOString() }).eq('id', orderId);
-            if (ord?.table_id) await supabase.from('restaurant_tables').update({ status: 'available' }).eq('id', ord.table_id);
+            const { data: ord, error: ordError } = await supabase
+                .from('orders')
+                .select('table_id')
+                .eq('id', orderId)
+                .single();
+            
+            if (ordError) throw ordError;
+            
+            await supabase.from('orders').update({ 
+                status: 'cancelled', 
+                total_amount: 0, 
+                cancelled_at: new Date().toISOString() 
+            }).eq('id', orderId);
+            
+            if (ord?.table_id) {
+                await supabase.from('restaurant_tables')
+                    .update({ status: 'available' })
+                    .eq('id', ord.table_id);
+            }
+            
             showToast('ແຈ້ງເຕືອນ', 'ຍົກເລີກທຸກລາຍການ — ຄຳສັ່ງຖືກຍົກເລີກ', 'warning');
             document.querySelector('.modal.show')?.remove();
         } else {
-            await supabase.from('orders').update({ total_amount: newTotal }).eq('id', orderId);
+            // Update order total
+            const { error: updateOrderError } = await supabase
+                .from('orders')
+                .update({ total_amount: newTotal })
+                .eq('id', orderId);
+            
+            if (updateOrderError) throw updateOrderError;
+            
             showToast('ສຳເລັດ', 'ຍົກເລີກລາຍການສຳເລັດ — ຍອດລວມອັບເດດແລ້ວ');
             document.querySelector('.modal.show')?.remove();
             viewOrderDetail(orderId); // re-open with updated data
         }
-        loadAllOrders(currentOrdersPage);
+        
+        // Refresh all affected views
+        if (currentPage === 'orders') loadAllOrders(currentOrdersPage);
         if (currentPage === 'kds') loadKDS();
-    } catch (err) { showToast('ຜິດພາດ', err.message, 'error'); }
+        if (currentPage === 'dashboard') loadDashboard();
+        
+    } catch (err) { 
+        showToast('ຜິດພາດ', err.message, 'error'); 
+        console.error('Cancel order item error:', err);
+    }
     hideLoading();
 }
-
 // ===== CANCEL WHOLE ORDER =====
 async function cancelWholeOrder(orderId, tableId) {
     if (!confirm('ທ່ານຕ້ອງການຍົກເລີກຄຳສັ່ງທັງໝົດແທ້ບໍ?')) return;
@@ -1483,28 +1528,61 @@ async function cancelWholeOrder(orderId, tableId) {
     hideLoading();
 }
 
-// ===== CHANGE TABLE =====
-async function changeOrderTable(orderId, oldTableId) {
-    const newTableId = document.getElementById('change-table-select')?.value;
-    if (!newTableId) { showToast('ແຈ້ງເຕືອນ', 'ກະລຸນາເລືອກໂຕະໃໝ່', 'warning'); return; }
+// ===== CHANGE TABLE ====
+async function changeOrderTable(orderId, oldTableId, modalId) {
+    const selectId = `change-table-select-${modalId || orderId}`;
+    const newTableId = document.getElementById(selectId)?.value;
+    
+    if (!newTableId) { 
+        showToast('ແຈ້ງເຕືອນ', 'ກະລຸນາເລືອກໂຕະໃໝ່', 'warning'); 
+        return; 
+    }
+    
     if (!confirm('ທ່ານຕ້ອງການຍ້າຍໂຕະແທ້ບໍ?')) return;
+    
     const supabase = initSupabase();
     showLoading();
     try {
         // Update order to new table
-        await supabase.from('orders').update({ table_id: newTableId }).eq('id', orderId);
+        const { error: orderError } = await supabase
+            .from('orders')
+            .update({ table_id: newTableId })
+            .eq('id', orderId);
+        
+        if (orderError) throw orderError;
+        
         // Free old table
-        if (oldTableId) await supabase.from('restaurant_tables').update({ status: 'available' }).eq('id', oldTableId);
+        if (oldTableId) {
+            const { error: oldTableError } = await supabase
+                .from('restaurant_tables')
+                .update({ status: 'available' })
+                .eq('id', oldTableId);
+            
+            if (oldTableError) throw oldTableError;
+        }
+        
         // Occupy new table
-        await supabase.from('restaurant_tables').update({ status: 'occupied' }).eq('id', newTableId);
+        const { error: newTableError } = await supabase
+            .from('restaurant_tables')
+            .update({ status: 'occupied' })
+            .eq('id', newTableId);
+        
+        if (newTableError) throw newTableError;
+        
         showToast('ສຳເລັດ', 'ຍ້າຍໂຕະສຳເລັດ');
         document.querySelector('.modal.show')?.remove();
-        loadAllOrders(currentOrdersPage);
+        
+        // Refresh affected pages
+        if (currentPage === 'orders') loadAllOrders(currentOrdersPage);
         if (currentPage === 'tables') loadTablesManagement();
-    } catch (err) { showToast('ຜິດພາດ', err.message, 'error'); }
+        if (currentPage === 'dashboard') loadDashboard();
+        
+    } catch (err) { 
+        showToast('ຜິດພາດ', err.message, 'error'); 
+        console.error('Change table error:', err);
+    }
     hideLoading();
 }
-
 async function startCooking(orderId) {
     const supabase = initSupabase();
     showLoading();
