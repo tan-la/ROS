@@ -1237,35 +1237,76 @@ async function loadAllOrders(page = 1) {
     showLoading();
     try {
         const supabase = initSupabase();
-
-        // Total count
-        const { count: total } = await supabase
-            .from('orders').select('*', { count: 'exact', head: true });
+        
+        // Build query with filters
+        let query = supabase.from('orders').select('*, restaurant_tables(table_number)', { count: 'exact' });
+        
+        // Apply status filter
+        if (currentOrderStatusFilter !== 'all') {
+            query = query.eq('status', currentOrderStatusFilter);
+        }
+        
+        // Apply date filter (if set)
+        if (currentOrderDateFilter) {
+            const startDate = currentOrderDateFilter;
+            const endDate = new Date(new Date(currentOrderDateFilter).getTime() + 86400000).toISOString().split('T')[0];
+            query = query.gte('created_at', startDate).lt('created_at', endDate);
+        }
+        
+        // Apply search filter (order number or customer name)
+        if (currentOrderSearchTerm) {
+            query = query.or(`order_number.ilike.%${currentOrderSearchTerm}%,customer_name.ilike.%${currentOrderSearchTerm}%`);
+        }
+        
+        // Get total count with filters
+        const { count: total, error: countError } = await query;
+        if (countError) throw countError;
+        
         totalOrders = total || 0;
-
+        
+        // Calculate pagination
         const start = (page - 1) * ordersPerPage;
-        const end   = start + ordersPerPage - 1;
-
-        const { data: orders, error } = await supabase
-            .from('orders')
-            .select('*, restaurant_tables(table_number)')
+        const end = start + ordersPerPage - 1;
+        
+        // Get paginated data
+        const { data: orders, error } = await query
             .order('created_at', { ascending: false })
             .range(start, end);
-
+        
         if (error) throw error;
-
+        
         const totalPages = Math.max(1, Math.ceil(totalOrders / ordersPerPage));
-
+        
+        // Calculate date range options for filter
+        const dateOptions = await getDateRangeOptions();
+        
         content.innerHTML = `
             <div class="data-table-container">
                 <div class="table-header">
                     <h3 class="table-title"><i class="fas fa-clipboard-list"></i> ລາຍການຄຳສັ່ງທັງໝົດ</h3>
-                    <div class="table-actions">
-                        <input type="text" id="order-search" class="search-input" placeholder="ຄົ້ນຫາຄຳສັ່ງ..." style="width:200px;">
+                    <div class="table-actions" style="flex-wrap:wrap;gap:8px;">
+                        <select id="status-filter" onchange="applyOrderFilters()" style="padding:6px 12px;border:1px solid var(--gray-300);border-radius:8px;font-family:inherit;">
+                            <option value="all" ${currentOrderStatusFilter === 'all' ? 'selected' : ''}>ທຸກສະຖານະ</option>
+                            <option value="pending" ${currentOrderStatusFilter === 'pending' ? 'selected' : ''}>ລໍຖ້າຢືນຢັນ</option>
+                            <option value="confirmed" ${currentOrderStatusFilter === 'confirmed' ? 'selected' : ''}>ຢືນຢັນແລ້ວ</option>
+                            <option value="cooking" ${currentOrderStatusFilter === 'cooking' ? 'selected' : ''}>ກຳລັງເຮັດ</option>
+                            <option value="completed" ${currentOrderStatusFilter === 'completed' ? 'selected' : ''}>ສຳເລັດ</option>
+                            <option value="paid" ${currentOrderStatusFilter === 'paid' ? 'selected' : ''}>ຊຳລະແລ້ວ</option>
+                            <option value="cancelled" ${currentOrderStatusFilter === 'cancelled' ? 'selected' : ''}>ຍົກເລີກ</option>
+                        </select>
+                        
+                        <select id="date-filter" onchange="applyOrderFilters()" style="padding:6px 12px;border:1px solid var(--gray-300);border-radius:8px;font-family:inherit;">
+                            <option value="">ທຸກວັນທີ</option>
+                            ${dateOptions}
+                        </select>
+                        
+                        <input type="text" id="order-search" class="search-input" placeholder="ຄົ້ນຫາເລກສັ່ງ/ຊື່..." style="width:200px;" value="${currentOrderSearchTerm}">
+                        <button class="btn btn-outline btn-sm" onclick="resetOrderFilters()"><i class="fas fa-undo"></i> ຣີເຊັດ</button>
+                        
                         <select id="orders-per-page" onchange="changeOrdersPerPage()" style="padding:6px 12px;border:1px solid var(--gray-300);border-radius:8px;font-family:inherit;">
-                            <option value="10"  ${ordersPerPage===10  ?'selected':''}>10 ລາຍການ</option>
-                            <option value="20"  ${ordersPerPage===20  ?'selected':''}>20 ລາຍການ</option>
-                            <option value="50"  ${ordersPerPage===50  ?'selected':''}>50 ລາຍການ</option>
+                            <option value="10" ${ordersPerPage===10 ?'selected':''}>10 ລາຍການ</option>
+                            <option value="20" ${ordersPerPage===20 ?'selected':''}>20 ລາຍການ</option>
+                            <option value="50" ${ordersPerPage===50 ?'selected':''}>50 ລາຍການ</option>
                             <option value="100" ${ordersPerPage===100 ?'selected':''}>100 ລາຍການ</option>
                         </select>
                     </div>
@@ -1282,7 +1323,7 @@ async function loadAllOrders(page = 1) {
                             ${!orders || orders.length === 0
                                 ? `<tr><td colspan="7" style="text-align:center;padding:60px;color:var(--gray-400);"><i class="fas fa-clipboard-list" style="font-size:2rem;display:block;margin-bottom:8px;"></i>ຍັງບໍ່ມີຄຳສັ່ງ</td></tr>`
                                 : orders.map(o => `
-                                    <tr data-search="${(o.order_number||'').toLowerCase()} ${(o.customer_name||'').toLowerCase()}">
+                                    <tr>
                                         <td><strong>${o.order_number || '-'}</strong></td>
                                         <td>ໂຕະ ${o.restaurant_tables?.table_number || '-'}</td>
                                         <td>${o.customer_name || 'ບໍ່ລະບຸ'}</td>
@@ -1292,7 +1333,6 @@ async function loadAllOrders(page = 1) {
                                         <td style="white-space:nowrap;">
                                             <button class="btn btn-success btn-sm" onclick="confirmOrder('${o.id}')" ${o.status !== 'pending' ? 'disabled' : ''} title="ຢືນຢັນ"><i class="fas fa-check"></i></button>
                                             <button class="btn btn-outline btn-sm" onclick="viewOrderDetail('${o.id}')" title="ລາຍລະອຽດ"><i class="fas fa-eye"></i></button>
-                                            ${o.status === 'completed' ? `<button class="btn btn-primary btn-sm" onclick="markAsPaid('${o.id}')" title="ຊຳລະ"><i class="fas fa-money-bill"></i></button>` : ''}
                                         </td>
                                     </tr>`).join('')}
                         </tbody>
@@ -1308,21 +1348,94 @@ async function loadAllOrders(page = 1) {
                     </button>
                 </div>
             </div>`;
-
-        // Client-side search filter
-        document.getElementById('order-search')?.addEventListener('input', e => {
-            const q = e.target.value.toLowerCase();
-            document.querySelectorAll('#orders-tbody tr[data-search]').forEach(row => {
-                row.style.display = row.dataset.search.includes(q) ? '' : 'none';
+        
+        // Add event listener for search with debounce
+        const searchInput = document.getElementById('order-search');
+        if (searchInput) {
+            let debounceTimer;
+            searchInput.addEventListener('input', (e) => {
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(() => {
+                    currentOrderSearchTerm = e.target.value;
+                    currentOrdersPage = 1;
+                    loadAllOrders(1);
+                }, 500);
             });
-        });
-
+        }
+        
     } catch (err) {
         content.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><p>${err.message}</p></div>`;
     }
     hideLoading();
 }
+        // Get date range options for filter (last 7 days, this month, last month)
+async function getDateRangeOptions() {
+    const today = new Date();
+    const options = [];
+    
+    // Today
+    const todayStr = today.toISOString().split('T')[0];
+    options.push(`<option value="${todayStr}">ມື້ນີ້ (${todayStr})</option>`);
+    
+    // Yesterday
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    options.push(`<option value="${yesterday.toISOString().split('T')[0]}">ມື້ວານນີ້</option>`);
+    
+    // Last 7 days
+    const last7Days = new Date(today);
+    last7Days.setDate(last7Days.getDate() - 7);
+    options.push(`<option value="last7">7 ມື້ຜ່ານມາ</option>`);
+    
+    // This month
+    const thisMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    options.push(`<option value="this_month">ເດືອນນີ້</option>`);
+    
+    // Last month
+    const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
+    options.push(`<option value="last_month">ເດືອນແລ້ວ</option>`);
+    
+    return options.join('');
+}
 
+// Apply filters function
+async function applyOrderFilters() {
+    const statusFilter = document.getElementById('status-filter')?.value || 'all';
+    const dateFilter = document.getElementById('date-filter')?.value || '';
+    
+    currentOrderStatusFilter = statusFilter;
+    currentOrderDateFilter = dateFilter;
+    currentOrdersPage = 1;
+    
+    // Handle special date ranges
+    if (dateFilter === 'last7') {
+        const today = new Date();
+        const last7Days = new Date(today);
+        last7Days.setDate(last7Days.getDate() - 7);
+        currentOrderDateFilter = last7Days.toISOString().split('T')[0];
+    } else if (dateFilter === 'this_month') {
+        const today = new Date();
+        currentOrderDateFilter = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+    } else if (dateFilter === 'last_month') {
+        const today = new Date();
+        currentOrderDateFilter = new Date(today.getFullYear(), today.getMonth() - 1, 1).toISOString().split('T')[0];
+    } else {
+        currentOrderDateFilter = dateFilter;
+    }
+    
+    await loadAllOrders(1);
+}
+
+// Reset all filters
+async function resetOrderFilters() {
+    currentOrderStatusFilter = 'all';
+    currentOrderDateFilter = '';
+    currentOrderSearchTerm = '';
+    currentOrdersPage = 1;
+    await loadAllOrders(1);
+}
+        
 function changeOrdersPage(newPage) {
     const totalPages = Math.ceil(totalOrders / ordersPerPage);
     if (newPage < 1 || newPage > totalPages) return;
