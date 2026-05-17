@@ -540,33 +540,39 @@ function buildNavigation() {
     const items = [];
 
     if (['cashier', 'admin', 'waiter'].includes(currentUser.role)) {
-        items.push({ icon: 'fa-tachometer-alt', label: 'ໜ້າຫຼັກ',      page: 'dashboard' });
+        items.push({ icon: 'fa-tachometer-alt', label: 'ໜ້າຫຼັກ', page: 'dashboard' });
     }
+    
+    // Kitchen gets limited menu
+    if (currentUser.role === 'kitchen') {
+        items.push({ icon: 'fa-tv', label: 'KDS (ເຮືອນຄົວ)', page: 'kds' });
+        items.push({ icon: 'fa-tachometer-alt', label: 'ໜ້າຫຼັກ', page: 'dashboard' });
+    }
+    
+    // Cashier and admin get full menu
     if (['cashier', 'admin'].includes(currentUser.role)) {
-        items.push({ icon: 'fa-utensils',       label: 'ເມນູອາຫານ',     page: 'menu' });
-        items.push({ icon: 'fa-chair',           label: 'ຈັດການໂຕະ',     page: 'tables' });
-        items.push({ icon: 'fa-clipboard-list', label: 'ຄຳສັ່ງ',         page: 'orders' });
-        items.push({ icon: 'fa-qrcode',          label: 'ສະແກນ QR',       page: 'scan' });
-        items.push({ icon: 'fa-chart-line',      label: 'ລາຍງານ',         page: 'reports' });
+        items.push({ icon: 'fa-utensils', label: 'ເມນູອາຫານ', page: 'menu' });
+        items.push({ icon: 'fa-chair', label: 'ຈັດການໂຕະ', page: 'tables' });
+        items.push({ icon: 'fa-clipboard-list', label: 'ຄຳສັ່ງ', page: 'orders' });
+        items.push({ icon: 'fa-qrcode', label: 'ສະແກນ QR', page: 'scan' });
+        items.push({ icon: 'fa-chart-line', label: 'ລາຍງານ', page: 'reports' });
+        items.push({ icon: 'fa-tv', label: 'KDS (ເຮືອນຄົວ)', page: 'kds' });
     }
-    if (['kitchen', 'admin'].includes(currentUser.role)) {
-        items.push({ icon: 'fa-tv',              label: 'KDS (ເຮືອນຄົວ)', page: 'kds' });
-    }
+    
     if (currentUser.role === 'admin') {
-        items.push({ icon: 'fa-users-cog',       label: 'ຈັດການພະນັກງານ', page: 'staff' });
+        items.push({ icon: 'fa-users-cog', label: 'ຈັດການພະນັກງານ', page: 'staff' });
     }
 
     items.forEach(item => {
-        const li  = document.createElement('li');
-        const a   = document.createElement('a');
-        a.id      = `nav-${item.page}`;
+        const li = document.createElement('li');
+        const a = document.createElement('a');
+        a.id = `nav-${item.page}`;
         a.innerHTML = `<i class="fas ${item.icon}"></i><span>${item.label}</span>`;
-        a.onclick   = () => loadPage(item.page);
+        a.onclick = () => loadPage(item.page);
         li.appendChild(a);
         navMenu.appendChild(li);
     });
 }
-
 async function loadPage(page) {
     // stop scanner if leaving scan page
     if (currentPage === 'scan' && page !== 'scan') stopCashierScanner();
@@ -706,64 +712,111 @@ async function loadDashboard() {
         const cookingCount  = cookingRes.count  || 0;
         const occupiedCount = tables.filter(t => t.status === 'occupied').length;
 
-        content.innerHTML = `
-            <div class="dashboard-stats">
-                <div class="stat-card" style="border-left-color:var(--warning);">
-                    <div class="stat-header"><span class="stat-label">ຄຳສັ່ງລໍຖ້າ</span><div class="stat-icon" style="background:var(--warning-light);color:var(--warning);"><i class="fas fa-clock"></i></div></div>
-                    <div class="stat-value">${pendingCount}</div>
+        // Different stats for kitchen vs cashier
+        if (currentUser.role === 'kitchen') {
+            // Kitchen dashboard - only cooking and occupied tables
+            content.innerHTML = `
+                <div class="dashboard-stats">
+                    <div class="stat-card" style="border-left-color:var(--primary);">
+                        <div class="stat-header"><span class="stat-label">ກຳລັງເຮັດ</span><div class="stat-icon"><i class="fas fa-fire"></i></div></div>
+                        <div class="stat-value">${cookingCount}</div>
+                    </div>
+                    <div class="stat-card" style="border-left-color:var(--info);">
+                        <div class="stat-header"><span class="stat-label">ໂຕະທີ່ມີລູກຄ້າ</span><div class="stat-icon" style="background:var(--info-light);color:var(--info);"><i class="fas fa-chair"></i></div></div>
+                        <div class="stat-value">${occupiedCount}/${tables.length}</div>
+                    </div>
                 </div>
-                <div class="stat-card" style="border-left-color:var(--primary);">
-                    <div class="stat-header"><span class="stat-label">ກຳລັງເຮັດ</span><div class="stat-icon"><i class="fas fa-fire"></i></div></div>
-                    <div class="stat-value">${cookingCount}</div>
-                </div>
-                <div class="stat-card" style="border-left-color:var(--success);">
-                    <div class="stat-header"><span class="stat-label">ລາຍຮັບມື້ນີ້</span><div class="stat-icon" style="background:var(--success-light);color:var(--success);"><i class="fas fa-money-bill-wave"></i></div></div>
-                    <div class="stat-value" style="font-size:1.25rem;">${formatCurrency(revenue)}</div>
-                </div>
-                <div class="stat-card" style="border-left-color:var(--info);">
-                    <div class="stat-header"><span class="stat-label">ໂຕະທີ່ມີລູກຄ້າ</span><div class="stat-icon" style="background:var(--info-light);color:var(--info);"><i class="fas fa-chair"></i></div></div>
-                    <div class="stat-value">${occupiedCount}/${tables.length}</div>
-                </div>
-            </div>
 
-            <div class="data-table-container">
-                <div class="table-header">
-                    <h3 class="table-title"><i class="fas fa-clipboard-list"></i> ຄຳສັ່ງລ້າສຸດ</h3>
-                    <button class="btn btn-primary btn-sm" onclick="showCustomerQRView()"><i class="fas fa-qrcode"></i> QR ສຳລັບລູກຄ້າ</button>
+                <div class="data-table-container">
+                    <div class="table-header">
+                        <h3 class="table-title"><i class="fas fa-clipboard-list"></i> ຄຳສັ່ງທີ່ກຳລັງເຮັດ</h3>
+                    </div>
+                    <div style="overflow-x:auto;">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>ເລກຄຳສັ່ງ</th><th>ໂຕະ</th><th>ລູກຄ້າ</th>
+                                    <th>ຍອດລວມ</th><th>ສະຖານະ</th><th>ຈັດການ</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${recentOrders.filter(o => o.status === 'cooking').length === 0
+                                    ? `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--gray-400);">ບໍ່ມີຄຳສັ່ງທີ່ກຳລັງເຮັດ</td></tr>`
+                                    : recentOrders.filter(o => o.status === 'cooking').map(o => `
+                                        <tr>
+                                            <td><strong>${o.order_number || '-'}</strong></td>
+                                            <td>ໂຕະ ${o.restaurant_tables?.table_number || '-'}</td>
+                                            <td>${o.customer_name || 'ບໍ່ລະບຸ'}</td>
+                                            <td style="font-weight:600;color:var(--primary);">${formatCurrency(o.total_amount)}</td>
+                                            <td><span class="status-badge status-${o.status}">${getStatusLabel(o.status)}</span></td>
+                                            <td>
+                                                <button class="btn btn-outline btn-sm" onclick="viewOrderDetail('${o.id}')"><i class="fas fa-eye"></i></button>
+                                            </td>
+                                        </tr>`).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>`;
+        } else {
+            // Cashier/Admin dashboard - full stats
+            content.innerHTML = `
+                <div class="dashboard-stats">
+                    <div class="stat-card" style="border-left-color:var(--warning);">
+                        <div class="stat-header"><span class="stat-label">ຄຳສັ່ງລໍຖ້າ</span><div class="stat-icon" style="background:var(--warning-light);color:var(--warning);"><i class="fas fa-clock"></i></div></div>
+                        <div class="stat-value">${pendingCount}</div>
+                    </div>
+                    <div class="stat-card" style="border-left-color:var(--primary);">
+                        <div class="stat-header"><span class="stat-label">ກຳລັງເຮັດ</span><div class="stat-icon"><i class="fas fa-fire"></i></div></div>
+                        <div class="stat-value">${cookingCount}</div>
+                    </div>
+                    <div class="stat-card" style="border-left-color:var(--success);">
+                        <div class="stat-header"><span class="stat-label">ລາຍຮັບມື້ນີ້</span><div class="stat-icon" style="background:var(--success-light);color:var(--success);"><i class="fas fa-money-bill-wave"></i></div></div>
+                        <div class="stat-value" style="font-size:1.25rem;">${formatCurrency(revenue)}</div>
+                    </div>
+                    <div class="stat-card" style="border-left-color:var(--info);">
+                        <div class="stat-header"><span class="stat-label">ໂຕະທີ່ມີລູກຄ້າ</span><div class="stat-icon" style="background:var(--info-light);color:var(--info);"><i class="fas fa-chair"></i></div></div>
+                        <div class="stat-value">${occupiedCount}/${tables.length}</div>
+                    </div>
                 </div>
-                <div style="overflow-x:auto;">
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th>ເລກຄຳສັ່ງ</th><th>ໂຕະ</th><th>ລູກຄ້າ</th>
-                                <th>ຍອດລວມ</th><th>ສະຖານະ</th><th>ຈັດການ</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${recentOrders.length === 0
-                                ? `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--gray-400);">ຍັງບໍ່ມີຄຳສັ່ງ</td></tr>`
-                                : recentOrders.map(o => `
-                                    <tr>
-                                        <td><strong>${o.order_number || '-'}</strong></td>
-                                        <td>ໂຕະ ${o.restaurant_tables?.table_number || '-'}</td>
-                                        <td>${o.customer_name || 'ບໍ່ລະບຸ'}</td>
-                                        <td style="font-weight:600;color:var(--primary);">${formatCurrency(o.total_amount)}</td>
-                                        <td><span class="status-badge status-${o.status}">${getStatusLabel(o.status)}</span></td>
-                                        <td>
-                                            ${o.status === 'pending' ? `<button class="btn btn-success btn-sm" onclick="confirmOrder('${o.id}')"><i class="fas fa-check"></i></button>` : ''}
-                                            <button class="btn btn-outline btn-sm" onclick="viewOrderDetail('${o.id}')"><i class="fas fa-eye"></i></button>
-                                        </td>
-                                    </tr>`).join('')}
-                        </tbody>
-                    </table>
-                </div>
-            </div>`;
+
+                <div class="data-table-container">
+                    <div class="table-header">
+                        <h3 class="table-title"><i class="fas fa-clipboard-list"></i> ຄຳສັ່ງລ້າສຸດ</h3>
+                        <button class="btn btn-primary btn-sm" onclick="showCustomerQRView()"><i class="fas fa-qrcode"></i> QR ສຳລັບລູກຄ້າ</button>
+                    </div>
+                    <div style="overflow-x:auto;">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>ເລກຄຳສັ່ງ</th><th>ໂຕະ</th><th>ລູກຄ້າ</th>
+                                    <th>ຍອດລວມ</th><th>ສະຖານະ</th><th>ຈັດການ</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${recentOrders.length === 0
+                                    ? `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--gray-400);">ຍັງບໍ່ມີຄຳສັ່ງ</td></tr>`
+                                    : recentOrders.map(o => `
+                                        <tr>
+                                            <td><strong>${o.order_number || '-'}</strong></td>
+                                            <td>ໂຕະ ${o.restaurant_tables?.table_number || '-'}</td>
+                                            <td>${o.customer_name || 'ບໍ່ລະບຸ'}</td>
+                                            <td style="font-weight:600;color:var(--primary);">${formatCurrency(o.total_amount)}</td>
+                                            <td><span class="status-badge status-${o.status}">${getStatusLabel(o.status)}</span></td>
+                                            <td>
+                                                ${o.status === 'pending' ? `<button class="btn btn-success btn-sm" onclick="confirmOrder('${o.id}')"><i class="fas fa-check"></i></button>` : ''}
+                                                <button class="btn btn-outline btn-sm" onclick="viewOrderDetail('${o.id}')"><i class="fas fa-eye"></i></button>
+                                            </td>
+                                        </tr>`).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>`;
+        }
     } catch (err) {
         content.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><p>ເກີດຂໍ້ຜິດພາດ: ${err.message}</p></div>`;
     }
     hideLoading();
 }
-
 // ============================================
 // MENU MANAGEMENT  (BUG FIX: missing > on </td)
 // ============================================
@@ -1414,17 +1467,17 @@ async function viewOrderDetail(orderId) {
                         </div>
                     </div>
                     ${order.special_instructions ? `<div class="form-group"><label>ໝາຍເຫດ</label><textarea readonly rows="2">${order.special_instructions}</textarea></div>` : ''}
-                    ${canEdit ? `
-                    <div class="form-group" style="background:var(--info-light);padding:12px;border-radius:8px;">
-                        <label style="color:var(--info);"><i class="fas fa-exchange-alt"></i> ຍ້າຍໂຕະ</label>
-                        <div style="display:flex;gap:8px;margin-top:6px;">
-                            <select id="change-table-select-${order.id}" style="flex:1;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-family:inherit;">
-                                <option value="">ເລືອກໂຕະໃໝ່...</option>
-                            </select>
-                            <button class="btn btn-warning btn-sm" onclick="changeOrderTable('${order.id}','${order.table_id}','${order.id}')">
-                                <i class="fas fa-exchange-alt"></i> ຍ້າຍ
-                            </button>
-                        </div>
+                    ${canEdit && currentUser && currentUser.role !== 'kitchen' ? `
+                <div class="form-group" style="background:var(--info-light);padding:12px;border-radius:8px;">
+                <label style="color:var(--info);"><i class="fas fa-exchange-alt"></i> ຍ້າຍໂຕະ</label>
+                <div style="display:flex;gap:8px;margin-top:6px;">
+                <select id="change-table-select-${order.id}" style="flex:1;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-family:inherit;">
+                <option value="">ເລືອກໂຕະໃໝ່...</option>
+                    </select>
+                <button class="btn btn-warning btn-sm" onclick="changeOrderTable('${order.id}','${order.table_id}','${order.id}')">
+                <i class="fas fa-exchange-alt"></i> ຍ້າຍ
+                    </button>
+                    </div>
                     </div>` : ''}
                 </div>
                 <div class="modal-footer">
@@ -1690,13 +1743,19 @@ async function loadKDS() {
                             const mins = order.confirmed_at
                                 ? Math.floor((Date.now() - new Date(order.confirmed_at)) / 60000) : 0;
                             const borderColor = mins > 20 ? 'var(--danger)' : mins > 10 ? 'var(--warning)' : 'var(--success)';
-                            const pendingItems = (order.order_items || []).filter(i => i.status !== 'completed');
+                            
+                            // Filter out cancelled items
+                            const activeItems = (order.order_items || []).filter(i => i.status !== 'cancelled');
+                            const totalAmount = activeItems.reduce((sum, i) => sum + (i.subtotal || 0), 0);
+                            const pendingItems = activeItems.filter(i => i.status !== 'completed');
+                            
                             return `
                                 <div class="kds-order-card" style="border-left-color:${borderColor};">
                                     <div class="kds-order-header">
                                         <div>
                                             <strong>${order.order_number}</strong>
                                             <div style="font-size:0.8rem;color:var(--gray-500);">ໂຕະ ${order.restaurant_tables?.table_number || '-'}</div>
+                                            <div style="font-size:0.8rem;font-weight:600;color:var(--primary);">ລວມ: ${formatCurrency(totalAmount)}</div>
                                         </div>
                                         <div>
                                             <div class="timer" style="color:${borderColor};"><i class="fas fa-clock"></i> ${mins} ນາທີ</div>
@@ -1730,7 +1789,6 @@ async function loadKDS() {
     }
     hideLoading();
 }
-
 async function markItemComplete(itemId, orderId) {
     const supabase = initSupabase();
     showLoading();
