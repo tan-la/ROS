@@ -610,14 +610,23 @@ async function loadPage(page) {
     else if (page === 'staff')     await loadStaffManagement();
     else if (page === 'scan')      await loadScanPage();
 }
-
+        
 // ============================================
 // REALTIME SUBSCRIPTION
 // ============================================
 function subscribeToRealtime() {
     const supabase = initSupabase();
     supabase.channel('restaurant-updates')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, (payload) => {
+            // Show toast notification when order becomes completed
+            if (payload.eventType === 'UPDATE' && payload.new.status === 'completed' && payload.old.status !== 'completed') {
+                showToast('ອັບເດດ', `ຄຳສັ່ງ ${payload.new.order_number} ສຳເລັດແລ້ວ`, 'info');
+            }
+            // Show toast when order is confirmed (sent to kitchen)
+            if (payload.eventType === 'UPDATE' && payload.new.status === 'confirmed' && payload.old.status === 'pending') {
+                showToast('ອັບເດດ', `ຄຳສັ່ງ ${payload.new.order_number} ຖືກສົ່ງໄປເຮືອນຄົວແລ້ວ`, 'success');
+            }
+            
             if (currentPage === 'dashboard') loadDashboard();
             if (currentPage === 'orders')   loadAllOrders(currentOrdersPage);
             if (currentPage === 'kds')      loadKDS();
@@ -632,7 +641,7 @@ function subscribeToRealtime() {
         })
         .subscribe();
 }
-
+        
 // ============================================
 // INITIALIZATION
 // ============================================
