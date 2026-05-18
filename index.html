@@ -1533,14 +1533,14 @@ function changeOrdersPerPage() {
 }
 
 // ===== ORDER ACTIONS =====
-        async function confirmOrder(orderId) {
+		async function confirmOrder(orderId) {
     const supabase = initSupabase();
     showLoading();
     try {
-        // Check if order has any non-cancelled items
+        // 1. Get all active (non-cancelled) items with their subtotals
         const { data: activeItems, error: itemsCheck } = await supabase
             .from('order_items')
-            .select('id')
+            .select('id, subtotal, status')
             .eq('order_id', orderId)
             .neq('status', 'cancelled');
         
@@ -1552,31 +1552,42 @@ function changeOrdersPerPage() {
             return;
         }
         
-        // Update order status
-        await supabase
+        // 2. Calculate the correct total from active items
+        const correctTotal = activeItems.reduce((sum, item) => sum + (item.subtotal || 0), 0);
+        
+        console.log('Confirming order, recalculated total:', correctTotal);
+        
+        // 3. Update order status AND total (force the correct total)
+        const { error: updateOrderError } = await supabase
             .from('orders')
             .update({ 
                 status: 'confirmed', 
-                confirmed_at: new Date().toISOString() 
+                confirmed_at: new Date().toISOString(),
+                total_amount: correctTotal   // ← explicit total from active items
             })
             .eq('id', orderId);
         
-        // Update only non-cancelled items to confirmed
-        await supabase
+        if (updateOrderError) throw updateOrderError;
+        
+        // 4. Update only non-cancelled items to confirmed
+        const { error: updateItemsError } = await supabase
             .from('order_items')
             .update({ status: 'confirmed' })
             .eq('order_id', orderId)
             .neq('status', 'cancelled');
         
+        if (updateItemsError) throw updateItemsError;
+        
         showToast('ສຳເລັດ', 'ຢືນຢັນຄຳສັ່ງ — ສົ່ງໄປຄົວແລ້ວ');
         await writeAuditLog('CONFIRM_ORDER', 'orders', orderId,
-            { status: 'pending' }, { status: 'confirmed' });
+            { status: 'pending' }, { status: 'confirmed', total: correctTotal });
         
-        // Refresh views
+        // 5. Refresh all relevant pages
         await loadAllOrders(currentOrdersPage);
-        if (currentPage === 'kds') loadKDS();
+        if (currentPage === 'kds') await loadKDS();
         
     } catch (err) { 
+        console.error('Confirm order error:', err);
         showToast('ຜິດພາດ', err.message, 'error'); 
     }
     hideLoading();
@@ -3739,7 +3750,8 @@ async function applyPaymentVoucher(originalTotal) {
     const voucherCode  = document.getElementById('applied-voucher-code')?.value || null;
     const originalTotal= parseFloat(document.getElementById('order-original-total')?.value) || 0;
     let finalTotal     = originalTotal - discount;
-    const received     = parseFloat(document.getElementById('amount-received')?.value) || 0;
+	const receivedRaw = document.getElementById('amount-received')?.getAttribute('data-raw') || '0';
+    const received     = parseInt(receivedRaw, 10) || 0;	
     let change         = method === 'cash' ? Math.max(0, received - finalTotal) : 0;
 
     if (!method) { 
