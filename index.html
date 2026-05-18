@@ -1780,6 +1780,22 @@ async function viewOrderDetail(orderId) {
                 .eq('id', orderId);
             if (updateTotalError) throw new Error(`Update total failed: ${updateTotalError.message}`);
             console.log(`✅ Order total updated to ${newTotal}`);
+
+			// ---------- VERIFICATION (add this block) ----------
+    const { data: verifyOrder, error: verifyError } = await supabase
+        .from('orders')
+        .select('total_amount')
+        .eq('id', orderId)
+        .single();
+    if (verifyError) {
+        console.warn('Verification fetch failed:', verifyError);
+    } else if (verifyOrder.total_amount !== newTotal) {
+        console.error(`CRITICAL: Update did not persist! DB has ${verifyOrder.total_amount}, expected ${newTotal}`);
+        showToast('ຜິດພາດ', 'ການອັບເດດຍອດລວມລົ້ມເຫຼວ', 'error');
+        return;  // Stop further processing
+    } else {
+        console.log('✅ Verification passed: total matches', verifyOrder.total_amount);
+    }
             
             await writeAuditLog('CANCEL_ITEM', 'order_items', itemId,
                 { status: 'pending' }, { status: 'cancelled', new_order_total: newTotal });
