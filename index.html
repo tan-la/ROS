@@ -3573,7 +3573,7 @@ async function validateVoucher(code, orderTotal) {
 // PAYMENT MODAL (Cash / QR Pay / Card + Change Calculator)
 // orders table needs: payment_method text, amount_received numeric, change_amount numeric
 // ============================================================
-async function showPaymentModal(orderId) {
+		async function showPaymentModal(orderId) {
     const supabase = initSupabase();
     showLoading();
     const { data: order } = await supabase
@@ -3649,8 +3649,8 @@ async function showPaymentModal(orderId) {
                 <div id="cash-section" style="display:none;">
                     <div class="form-group">
                         <label><i class="fas fa-hand-holding-usd"></i> ຮັບເງິນ (₭)</label>
-                        <input type="number" id="amount-received" min="0" placeholder="0"
-                            oninput="calcChange()"
+                        <input type="text" id="amount-received" placeholder="0"
+                            oninput="formatAmountReceived(this); calcChange()"
                             style="width:100%;padding:10px;border:2px solid var(--primary);border-radius:8px;font-size:1.1rem;font-family:inherit;font-weight:600;text-align:right;">
                     </div>
                     <div style="background:var(--success-light);border-radius:8px;padding:14px;text-align:center;">
@@ -3674,6 +3674,17 @@ async function showPaymentModal(orderId) {
     document.body.appendChild(modal);
 }
 
+function formatAmountReceived(inputElement) {
+    let rawValue = inputElement.value.replace(/[^0-9]/g, '');
+    if (rawValue === '') rawValue = '0';
+    let numberValue = parseInt(rawValue, 10);
+    // Format with commas
+    let formatted = numberValue.toLocaleString('lo-LA');
+    inputElement.value = formatted;
+    // Store raw numeric value in a data attribute for calculations
+    inputElement.setAttribute('data-raw', numberValue);
+}		
+		
 function selectPayMethod(method) {
     ['cash','qr','card'].forEach(m => {
         const btn = document.getElementById(`pay-btn-${m}`);
@@ -3685,16 +3696,29 @@ function selectPayMethod(method) {
     document.getElementById('cash-section').style.display = method === 'cash' ? 'block' : 'none';
     if (method !== 'cash') { document.getElementById('change-display').textContent = '0 ₭'; }
 }
-
-function calcChange() {
-    const finalTotal = parseFloat(document.getElementById('final-total-display')?.textContent.replace(/[^0-9]/g,'')) || 0;
-    const received   = parseFloat(document.getElementById('amount-received')?.value) || 0;
-    const change     = Math.max(0, received - finalTotal);
+		
+		function calcChange() {
+    const finalTotalEl = document.getElementById('final-total-display');
+    const amountReceivedEl = document.getElementById('amount-received');
+    if (!finalTotalEl || !amountReceivedEl) return;
+    
+    const finalTotal = parseFloat(finalTotalEl.textContent.replace(/[^0-9]/g,'')) || 0;
+    let received = 0;
+    // Try to get raw value from data attribute, otherwise parse from formatted text
+    const raw = amountReceivedEl.getAttribute('data-raw');
+    if (raw !== null && raw !== '') {
+        received = parseInt(raw, 10);
+    } else {
+        received = parseFloat(amountReceivedEl.value.replace(/[^0-9]/g,'')) || 0;
+    }
+    const change = Math.max(0, received - finalTotal);
     const el = document.getElementById('change-display');
-    if (el) el.textContent = formatCurrency(change);
-    if (el) el.style.color = received < finalTotal ? 'var(--danger)' : 'var(--success)';
+    if (el) {
+        el.textContent = formatCurrency(change);
+        el.style.color = received < finalTotal ? 'var(--danger)' : 'var(--success)';
+    }
 }
-
+		
 async function applyPaymentVoucher(originalTotal) {
     const code   = document.getElementById('pay-voucher-code')?.value.trim();
     const result = document.getElementById('voucher-result');
@@ -3776,13 +3800,17 @@ async function applyPaymentVoucher(originalTotal) {
         // Deduct stock
         await deductStockForOrder(orderId);
 
-        // Audit log
+		// Audit log
         await writeAuditLog('PAY_ORDER', 'orders', orderId,
             { status: 'completed' },
             { status: 'paid', method, finalTotal, discount, voucherCode }
         );
 
-        document.querySelector('.modal.show')?.remove();
+        // ---------- FIXED: Explicitly close the payment modal ----------
+        const paymentModal = document.getElementById('payment-modal');
+        if (paymentModal) paymentModal.remove();
+        // ----------------------------------------------------------------
+
         showToast('ສຳເລັດ', `ຊຳລະສຳເລັດ ${method === 'cash' ? `| ທອນ: ${formatCurrency(change)}` : ''}`);
         await printReceipt(orderId);
         loadAllOrders(currentOrdersPage);
@@ -3792,6 +3820,7 @@ async function applyPaymentVoucher(originalTotal) {
     }
     hideLoading();
 }
+		
 // ============================================================
 // STOCK MANAGEMENT
 // Supabase tables needed:
