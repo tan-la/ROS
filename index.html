@@ -1724,8 +1724,8 @@ async function viewOrderDetail(orderId) {
     hideLoading();
 }
 // ===== CANCEL SINGLE ORDER ITEM =====
-async function cancelOrderItem(itemId, orderId, itemSubtotal) {
-    console.log('Cancel item called:', { itemId, orderId, itemSubtotal });
+		async function cancelOrderItem(itemId, orderId, itemSubtotal) {
+    console.log('🚀 cancelOrderItem called:', { itemId, orderId, itemSubtotal });
     
     if (!confirm('ທ່ານຕ້ອງການຍົກເລີກລາຍການນີ້ແທ້ບໍ?')) return;
     
@@ -1733,101 +1733,81 @@ async function cancelOrderItem(itemId, orderId, itemSubtotal) {
     showLoading();
     
     try {
-        // Get current order status
-        const { data: order, error: orderError } = await supabase
-            .from('orders')
-            .select('status, table_id')
-            .eq('id', orderId)
-            .single();
-        
-        if (orderError) throw orderError;
-        
-        // Allow cancellation for pending AND confirmed (matches canEdit in viewOrderDetail)
-        if (!['pending', 'confirmed'].includes(order.status)) {
-            showToast('ແຈ້ງເຕືອນ', 'ສາມາດຍົກເລີກລາຍການໄດ້ສະເພາະຄຳສັ່ງ pending ຫຼື confirmed ເທົ່ານັ້ນ', 'warning');
-            hideLoading();
-            return;
-        }
-        
-        // 1. Delete the item from order_items (or mark as cancelled)
-        const { error: deleteError } = await supabase
+        // 1. Mark the item as cancelled
+        const { error: cancelError } = await supabase
             .from('order_items')
             .update({ status: 'cancelled' })
             .eq('id', itemId);
+        if (cancelError) throw new Error(`Cancel item failed: ${cancelError.message}`);
+        console.log('✅ Item marked cancelled');
         
-        if (deleteError) throw deleteError;
-        
-        // 2. Get remaining active items
-        const { data: remainingItems, error: itemsError } = await supabase
+        // 2. Fetch all items for this order (including the updated one)
+        const { data: allItems, error: fetchError } = await supabase
             .from('order_items')
-            .select('id, subtotal, status')
-            .eq('order_id', orderId)
-            .neq('status', 'cancelled');  // Only get non-cancelled items
+            .select('subtotal, status')
+            .eq('order_id', orderId);
+        if (fetchError) throw new Error(`Fetch items failed: ${fetchError.message}`);
         
-        if (itemsError) throw itemsError;
+        // 3. Calculate total from active items (status != 'cancelled')
+        const activeItems = allItems.filter(i => i.status !== 'cancelled');
+        const newTotal = activeItems.reduce((sum, i) => sum + (i.subtotal || 0), 0);
+        console.log(`📊 New total calculated: ${newTotal} (from ${activeItems.length} active items)`);
         
-        console.log('Remaining items after cancellation:', remainingItems);
-        
-        // 3. Calculate new total
-        const newTotal = remainingItems.reduce((sum, item) => sum + (item.subtotal || 0), 0);
-        
-        // 4. If no items left, cancel the whole order
-        if (remainingItems.length === 0) {
-            const { error: cancelOrderError } = await supabase
+        // 4. If no active items, cancel the whole order
+        if (activeItems.length === 0) {
+            const { data: order } = await supabase
                 .from('orders')
-                .update({ 
-                    status: 'cancelled', 
-                    total_amount: 0,
-                    cancelled_at: new Date().toISOString(),
-                    cancelled_reason: 'ຍົກເລີກທຸກລາຍການ'
-                })
+                .select('table_id')
+                .eq('id', orderId)
+                .single();
+            await supabase
+                .from('orders')
+                .update({ status: 'cancelled', total_amount: 0, cancelled_at: new Date().toISOString() })
                 .eq('id', orderId);
-            
-            if (cancelOrderError) throw cancelOrderError;
-            
-            // Free the table if it was occupied
-            if (order.table_id) {
+            if (order?.table_id) {
                 await supabase
                     .from('restaurant_tables')
                     .update({ status: 'available' })
                     .eq('id', order.table_id);
             }
-            
             showToast('ສຳເລັດ', 'ຍົກເລີກຄຳສັ່ງທັງໝົດ', 'warning');
             document.querySelector('.modal.show')?.remove();
-            await writeAuditLog('CANCEL_ALL_ITEMS', 'orders', orderId,
-                { status: order.status }, { status: 'cancelled', reason: 'all items cancelled' });
-            
         } else {
-            // 5. Update order total
+            // 5. Update the order total
             const { error: updateTotalError } = await supabase
                 .from('orders')
                 .update({ total_amount: newTotal })
                 .eq('id', orderId);
-            
-            if (updateTotalError) throw updateTotalError;
+            if (updateTotalError) throw new Error(`Update total failed: ${updateTotalError.message}`);
+            console.log(`✅ Order total updated to ${newTotal}`);
             
             await writeAuditLog('CANCEL_ITEM', 'order_items', itemId,
                 { status: 'pending' }, { status: 'cancelled', new_order_total: newTotal });
             
             showToast('ສຳເລັດ', `ຍົກເລີກລາຍການສຳເລັດ (ຍອດລວມໃໝ່: ${formatCurrency(newTotal)})`, 'success');
             
-            // Close and reopen modal to show updated data
-            document.querySelector('.modal.show')?.remove();
-            await viewOrderDetail(orderId);
+            // Close current modal and reopen with updated data
+            const currentModal = document.querySelector('.modal.show');
+            if (currentModal) currentModal.remove();
+            // Small delay to ensure Supabase has propagated
+            setTimeout(async () => {
+                await viewOrderDetail(orderId);
+            }, 300);
         }
         
-        // Refresh all pages
+        // Refresh all relevant pages
         if (currentPage === 'orders') await loadAllOrders(currentOrdersPage);
         if (currentPage === 'kds') await loadKDS();
         if (currentPage === 'dashboard') await loadDashboard();
         
     } catch (err) { 
-        console.error('Cancel error:', err);
+        console.error('❌ Cancel error:', err);
         showToast('ຜິດພາດ', err.message, 'error'); 
+    } finally {
+        hideLoading();
     }
-    hideLoading();
 }
+
 // ===== CANCEL WHOLE ORDER =====
 async function cancelWholeOrder(orderId, tableId) {
     if (!confirm('ທ່ານຕ້ອງການຍົກເລີກຄຳສັ່ງທັງໝົດແທ້ບໍ?')) return;
