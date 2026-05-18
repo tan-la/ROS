@@ -573,10 +573,11 @@ function buildNavigation() {
     }
     
     if (currentUser.role === 'admin') {
-        items.push({ icon: 'fa-users-cog',       label: 'ຈັດການພະນັກງານ', page: 'staff' });
+        items.push({ icon: 'fa-users-cog',        label: 'ຈັດການພະນັກງານ', page: 'staff' });
         items.push({ icon: 'fa-boxes',            label: 'ສະຕ໋ອກວັດຖຸດິບ',  page: 'stock' });
-        items.push({ icon: 'fa-tag',              label: 'ສ່ວນຫຼຸດ / ບັດ',   page: 'vouchers' });
+        items.push({ icon: 'fa-tag',              label: 'ຄູປ໋ອງສ່ວນຫຼຸດ',   page: 'vouchers' });
         items.push({ icon: 'fa-history',          label: 'Audit Log',        page: 'auditlog' });
+	items.push({ icon: 'fa-blender', 	  label: 'ສູດອາຫານ', page: 'recipes' }); 
     }
 
     items.forEach(item => {
@@ -604,8 +605,9 @@ async function loadPage(page) {
         staff:     'ຈັດການພະນັກງານ',
         scan:      'ສະແກນ QR',
         stock:     'ຈັດການສະຕ໋ອກວັດຖຸດິບ',
-        vouchers:  'ສ່ວນຫຼຸດ & ບັດກຳນົດ',
-        auditlog:  'ປະຫວັດການດຳເນີນງານ'
+        vouchers:  'ບັດສ່ວນຫຼຸດ',
+    	auditlog:  'ປະຫວັດການດຳເນີນງານ',
+    	recipes:   'ສູດອາຫານ (ວັດຖຸດິບ)' 
     };
     document.getElementById('page-title').textContent = titles[page] || page;
 
@@ -625,6 +627,7 @@ async function loadPage(page) {
     else if (page === 'stock')     await loadStockManagement();
     else if (page === 'vouchers')  await loadVoucherManagement();
     else if (page === 'auditlog')  await loadAuditLog();
+    else if (page === 'recipes')   await loadRecipeManagement();
 }
         
 // ============================================
@@ -947,6 +950,10 @@ async function toggleMenuItemStatus(id, newStatus) {
     showLoading();
     try {
         await supabase.from('menu_items').update({ is_available: newStatus }).eq('id', id);
+        await writeAuditLog('TOGGLE_MENU', 'menu_items', id,
+            { is_available: !newStatus },
+            { is_available: newStatus }
+        );
         showToast('ສຳເລັດ', 'ປ່ຽນສະຖານະສຳເລັດ');
         loadMenuManagement();
     } catch (err) { showToast('ຜິດພາດ', err.message, 'error'); }
@@ -1126,6 +1133,10 @@ async function updateMenuItemWithImage(id) {
         if (imgFile) updateData.image_url = await uploadMenuItemImage(imgFile);
 
         await supabase.from('menu_items').update(updateData).eq('id', id);
+        await writeAuditLog('UPDATE_MENU', 'menu_items', id,
+            null,
+            { name_lo, price, category_id, is_recommended }
+        );
         document.querySelector('.modal.show')?.remove();
         showToast('ສຳເລັດ', 'ອັບເດດອາຫານສຳເລັດ');
         loadMenuManagement();
@@ -1872,6 +1883,10 @@ async function changeOrderTable(orderId, oldTableId, modalId) {
         if (newTableError) throw newTableError;
         
         showToast('ສຳເລັດ', 'ຍ້າຍໂຕະສຳເລັດ');
+        await writeAuditLog('CHANGE_TABLE', 'orders', orderId,
+            { table_id: oldTableId },
+            { table_id: newTableId }
+        );
         document.querySelector('.modal.show')?.remove();
         
         // Refresh affected pages
@@ -2290,12 +2305,14 @@ async function saveStaff() {
     if (!name || !email) { showToast('ແຈ້ງເຕືອນ', 'ກະລຸນາປ້ອນຊື່ ແລະ ອີເມວ', 'warning'); return; }
     showLoading();
     try {
+        const role = document.getElementById('staff_role')?.value;
         await supabase.from('staff').insert([{
             name, email,
             phone:  document.getElementById('staff_phone')?.value.trim(),
-            role:   document.getElementById('staff_role')?.value,
+            role,
             active: true
         }]);
+        await writeAuditLog('ADD_STAFF', 'staff', email, null, { name, email, role });
         document.querySelector('.modal.show')?.remove();
         showToast('ສຳເລັດ', 'ເພີ່ມພະນັກງານສຳເລັດ (ລະຫັດ: 123456)');
         loadStaffManagement();
@@ -2590,6 +2607,11 @@ window.generateQRForSelectedTable = generateQRForSelectedTable;
 window.loadScanPage            = loadScanPage;
 window.startCashierQRScanner  = startCashierQRScanner;
 window.closeCashierScanner     = closeCashierScanner;
+window.loadRecipeManagement = loadRecipeManagement;
+window.showAddRecipeModal = showAddRecipeModal;
+window.saveRecipeIngredient = saveRecipeIngredient;
+window.removeRecipeIngredient = removeRecipeIngredient;
+window.changeRecipePage = changeRecipePage;
 
     // ===== PART 6 =====
 // ============================================
@@ -3144,45 +3166,137 @@ async function writeAuditLog(action, tableName, recordId, oldData = null, newDat
 // ============================================================
 // AUDIT LOG PAGE (Admin only)
 // ============================================================
-        async function loadAuditLog() {
+// ── Audit action metadata ─────────────────────────────────────
+function getAuditMeta(action) {
+    const map = {
+        LOGIN:            { label: 'ເຂົ້າລະບົບ',          icon: 'fa-sign-in-alt',     bg: '#d6eaf8', color: '#2471a3' },
+        CONFIRM_ORDER:    { label: 'ຢືນຢັນຄຳສັ່ງ',        icon: 'fa-check-circle',    bg: '#d5f5e3', color: '#1e8449' },
+        CANCEL_ITEM:      { label: 'ຍົກເລີກລາຍການ',       icon: 'fa-minus-circle',    bg: '#fadbd8', color: '#c0392b' },
+        CANCEL_ALL_ITEMS: { label: 'ຍົກເລີກທຸກລາຍການ',   icon: 'fa-times-circle',    bg: '#fadbd8', color: '#c0392b' },
+        CANCEL_ORDER:     { label: 'ຍົກເລີກຄຳສັ່ງ',       icon: 'fa-ban',             bg: '#fadbd8', color: '#c0392b' },
+        PAY_ORDER:        { label: 'ຊຳລະເງິນ',             icon: 'fa-cash-register',   bg: '#d5f5e3', color: '#1e8449' },
+        ADD_VOUCHER:      { label: 'ເພີ່ມໂຄດສ່ວນຫຼຸດ',    icon: 'fa-tag',             bg: '#fef9e7', color: '#d68910' },
+        ADD_STAFF:        { label: 'ເພີ່ມພະນັກງານ',        icon: 'fa-user-plus',       bg: '#d6eaf8', color: '#2471a3' },
+        ADD_INGREDIENT:   { label: 'ເພີ່ມວັດຖຸດິບ',        icon: 'fa-boxes',           bg: '#fdebd0', color: '#d35400' },
+        RESTOCK:          { label: 'ເຕີມສະຕ໋ອກ',           icon: 'fa-plus-circle',     bg: '#d5f5e3', color: '#1e8449' },
+        UPDATE_MENU:      { label: 'ແກ້ໄຂເມນູ',            icon: 'fa-edit',            bg: '#fdebd0', color: '#d35400' },
+        TOGGLE_MENU:      { label: 'ປ່ຽນສະຖານະເມນູ',      icon: 'fa-toggle-on',       bg: '#fdebd0', color: '#d35400' },
+        CHANGE_TABLE:     { label: 'ຍ້າຍໂຕະ',              icon: 'fa-exchange-alt',    bg: '#fef9e7', color: '#d68910' },
+    };
+    return map[action] || { label: action, icon: 'fa-dot-circle', bg: '#f3f4f6', color: '#4b5563' };
+}
+
+// ── Format JSON for readable display ─────────────────────────
+function formatAuditData(data) {
+    if (!data || data === '-') return '<span style="color:var(--gray-400);">-</span>';
+    // data comes from Supabase as a JS object (jsonb auto-parsed), not a string
+    const obj = (typeof data === 'string') ? JSON.parse(data) : data;
+    const entries = Object.entries(obj);
+    return entries.map(([k, v]) => {
+        const val = (typeof v === 'object') ? JSON.stringify(v) : String(v);
+        // Truncate very long values
+        const display = val.length > 40 ? val.slice(0, 40) + '…' : val;
+        return `<div style="display:flex;gap:4px;margin-bottom:2px;flex-wrap:wrap;">
+            <span style="font-weight:600;color:var(--gray-600);min-width:80px;">${k}:</span>
+            <span style="color:var(--gray-800);word-break:break-all;">${display}</span>
+        </div>`;
+    }).join('');
+}
+
+// ── Short record ID display ───────────────────────────────────
+function shortId(id) {
+    if (!id || id === 'undefined') return '-';
+    // If it looks like a UUID show first 8 chars, else show as-is (truncated)
+    return id.length > 16 ? id.slice(0, 8) + '…' : id;
+}
+
+async function loadAuditLog(filterAction = '', filterUser = '') {
     const content = document.getElementById('content-area');
     showLoading();
     try {
         const supabase = initSupabase();
-        const { data: logs } = await supabase
+
+        const { data: allLogs } = await supabase
             .from('audit_logs')
             .select('*')
             .order('created_at', { ascending: false })
-            .limit(200);
+            .limit(500);
+
+        const logs    = allLogs || [];
+        const users   = [...new Set(logs.map(l => l.user_name).filter(Boolean))];
+        const actions = [...new Set(logs.map(l => l.action).filter(Boolean))];
+
+        let filtered = logs;
+        if (filterAction) filtered = filtered.filter(l => l.action === filterAction);
+        if (filterUser)   filtered = filtered.filter(l => l.user_name === filterUser);
 
         content.innerHTML = `
             <div class="data-table-container">
                 <div class="table-header">
-                    <h3 class="table-title"><i class="fas fa-history"></i> ປະຫວັດການດຳເນີນງານ</h3>
-                    <div class="table-actions">
-                        <input type="text" id="audit-search" class="search-input" placeholder="ຄົ້ນຫາ..." style="width:180px;" oninput="filterAuditLog(this.value)">
+                    <h3 class="table-title"><i class="fas fa-history"></i> ປະຫວັດການດຳເນີນງານ
+                        <span style="font-size:0.75rem;font-weight:400;color:var(--gray-500);margin-left:8px;">(${filtered.length} ລາຍການ)</span>
+                    </h3>
+                    <div class="table-actions" style="flex-wrap:wrap;gap:8px;">
+                        <input type="text" id="audit-search" class="search-input"
+                            placeholder="ຄົ້ນຫາ..." style="width:160px;"
+                            oninput="filterAuditLog(this.value)">
+                        <select id="audit-filter-action" onchange="applyAuditFilters()"
+                            style="padding:7px 10px;border:1px solid var(--gray-300);border-radius:8px;font-family:inherit;font-size:0.8rem;">
+                            <option value="">ທຸກການດຳເນີນ</option>
+                            ${actions.map(a => {
+                                const meta = getAuditMeta(a);
+                                return `<option value="${a}" ${filterAction===a?'selected':''}>${meta.label}</option>`;
+                            }).join('')}
+                        </select>
+                        <select id="audit-filter-user" onchange="applyAuditFilters()"
+                            style="padding:7px 10px;border:1px solid var(--gray-300);border-radius:8px;font-family:inherit;font-size:0.8rem;">
+                            <option value="">ທຸກຜູ້ໃຊ້</option>
+                            ${users.map(u => `<option value="${u}" ${filterUser===u?'selected':''}>${u}</option>`).join('')}
+                        </select>
+                        <button class="btn btn-outline btn-sm" onclick="exportAuditLog()">
+                            <i class="fas fa-download"></i> Excel
+                        </button>
                     </div>
                 </div>
                 <div style="overflow-x:auto;">
                     <table class="data-table" style="width:100%;">
                         <thead>
-                            <tr><th>ເວລາ</th><th>ຜູ້ໃຊ້</th><th>ການດຳເນີນ</th><th>ຕາຕະລາງ</th><th>Record ID</th><th>ຂໍ້ມູນເກົ່າ</th><th>ຂໍ້ມູນໃໝ່</th></tr>
+                            <tr>
+                                <th style="white-space:nowrap;">ເວລາ</th>
+                                <th>ຜູ້ໃຊ້</th>
+                                <th>ການດຳເນີນ</th>
+                                <th>ຕາຕະລາງ</th>
+                                <th>Record ID</th>
+                                <th>ລາຍລະອຽດ</th>
+                            </tr>
                         </thead>
                         <tbody id="audit-tbody">
-                            ${!logs || logs.length === 0
-                                ? `<td><td colspan="7" style="text-align:center;padding:40px;color:var(--gray-400);">ຍັງບໍ່ມີ Log</td></tr>`
-                                : logs.map(l => {
-                                    const oldDataStr = l.old_data ? JSON.stringify(l.old_data) : '-';
-                                    const newDataStr = l.new_data ? JSON.stringify(l.new_data) : '-';
+                            ${filtered.length === 0
+                                ? `<tr><td colspan="6" style="text-align:center;padding:60px;color:var(--gray-400);">
+                                    <i class="fas fa-history" style="font-size:2rem;display:block;margin-bottom:8px;"></i>
+                                    ຍັງບໍ່ມີ Log
+                                   </td></tr>`
+                                : filtered.map((l, idx) => {
+                                    const meta = getAuditMeta(l.action);
+                                    const searchStr = [l.user_name, l.action, l.table_name, l.record_id].join(' ').toLowerCase();
+                                    // Create a unique ID for modal data
+                                    const modalId = `audit-modal-${Date.now()}-${idx}`;
                                     return `
-                                    <tr data-search="${(l.user_name||'').toLowerCase()} ${(l.action||'').toLowerCase()}">
+                                    <tr data-search="${searchStr}" style="cursor:pointer;" onclick="showAuditDetailModal(${JSON.stringify(l).replace(/"/g, '&quot;')})">
                                         <td style="font-size:0.75rem;white-space:nowrap;">${formatDateTime(l.created_at)}</td>
                                         <td><strong>${l.user_name || '-'}</strong></td>
-                                        <td><span class="status-badge status-info" style="background:var(--info-light);color:var(--info);">${l.action || '-'}</span></td>
-                                        <td style="font-size:0.75rem;">${l.table_name || '-'}</td>
-                                        <td style="font-size:0.7rem;color:var(--gray-500);">${(l.record_id||'').slice(0,12)}...</td>
-                                        <td style="font-size:0.7rem;max-width:200px;word-break:break-word;" title="${oldDataStr.replace(/"/g, '&quot;')}">${oldDataStr.length > 50 ? oldDataStr.substring(0,50)+'...' : oldDataStr}</td>
-                                        <td style="font-size:0.7rem;max-width:200px;word-break:break-word;" title="${newDataStr.replace(/"/g, '&quot;')}">${newDataStr.length > 50 ? newDataStr.substring(0,50)+'...' : newDataStr}</td>
+                                        <td>
+                                            <span style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:20px;font-size:0.72rem;font-weight:700;background:${meta.bg};color:${meta.color};white-space:nowrap;">
+                                                <i class="fas ${meta.icon}"></i> ${meta.label}
+                                            </span>
+                                        </td>
+                                        <td><code style="background:var(--gray-100);padding:2px 6px;border-radius:4px;">${l.table_name || '-'}</code></td>
+                                        <td><span style="font-family:monospace;font-size:0.72rem;">${shortId(l.record_id)}</span></td>
+                                        <td>
+                                            <button class="btn btn-outline btn-sm" onclick="event.stopPropagation(); showAuditDetailModal(${JSON.stringify(l).replace(/"/g, '&quot;')})">
+                                                <i class="fas fa-eye"></i> ເບິ່ງລາຍລະອຽດ
+                                            </button>
+                                        </td>
                                     </tr>`;
                                 }).join('')}
                         </tbody>
@@ -3194,10 +3308,89 @@ async function writeAuditLog(action, tableName, recordId, oldData = null, newDat
     }
     hideLoading();
 }
+
+function showAuditDetailModal(log) {
+    // Format old and new data nicely
+    const formatData = (data) => {
+        if (!data || data === '-') return '<span style="color:var(--gray-400);">-</span>';
+        return `<pre style="background:var(--gray-100);padding:12px;border-radius:8px;overflow-x:auto;font-family:monospace;font-size:0.8rem;margin:0;">${JSON.stringify(data, null, 2)}</pre>`;
+    };
+
+    const meta = getAuditMeta(log.action);
+    const modal = document.createElement('div');
+    modal.className = 'modal show';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:700px;">
+            <div class="modal-header" style="background:${meta.bg};color:${meta.color};">
+                <h3 style="display:flex;align-items:center;gap:8px;">
+                    <i class="fas ${meta.icon}"></i>
+                    ${meta.label}
+                </h3>
+                <button class="close-btn" onclick="this.closest('.modal').remove()" style="color:${meta.color};">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+                    <div><strong>ເວລາ:</strong> ${formatDateTime(log.created_at)}</div>
+                    <div><strong>ຜູ້ໃຊ້:</strong> ${log.user_name || '-'}</div>
+                    <div><strong>ຕາຕະລາງ:</strong> <code>${log.table_name || '-'}</code></div>
+                    <div><strong>Record ID:</strong> <code>${log.record_id || '-'}</code></div>
+                </div>
+                <div style="border-top:1px solid var(--gray-200);margin:12px 0;"></div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+                    <div>
+                        <h4 style="margin-bottom:8px;"><i class="fas fa-database"></i> ຂໍ້ມູນເກົ່າ</h4>
+                        ${formatData(log.old_data)}
+                    </div>
+                    <div>
+                        <h4 style="margin-bottom:8px;"><i class="fas fa-database"></i> ຂໍ້ມູນໃໝ່</h4>
+                        ${formatData(log.new_data)}
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="this.closest('.modal').remove()">ປິດ</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+}
+
 function filterAuditLog(q) {
+    const term = q.toLowerCase();
     document.querySelectorAll('#audit-tbody tr[data-search]').forEach(row => {
-        row.style.display = row.dataset.search.includes(q.toLowerCase()) ? '' : 'none';
+        row.style.display = row.dataset.search.includes(term) ? '' : 'none';
     });
+}
+
+function applyAuditFilters() {
+    const action = document.getElementById('audit-filter-action')?.value || '';
+    const user   = document.getElementById('audit-filter-user')?.value   || '';
+    loadAuditLog(action, user);
+}
+
+async function exportAuditLog() {
+    showLoading();
+    try {
+        const supabase = initSupabase();
+        const { data: logs } = await supabase
+            .from('audit_logs').select('*').order('created_at', { ascending: false }).limit(500);
+
+        const rows = (logs || []).map(l => ({
+            'ເວລາ':        formatDateTime(l.created_at),
+            'ຜູ້ໃຊ້':       l.user_name || '-',
+            'ການດຳເນີນ':   l.action || '-',
+            'ຕາຕະລາງ':     l.table_name || '-',
+            'Record ID':   l.record_id || '-',
+            'ຂໍ້ມູນເກົ່າ':   l.old_data ? JSON.stringify(l.old_data) : '-',
+            'ຂໍ້ມູນໃໝ່':    l.new_data ? JSON.stringify(l.new_data) : '-',
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Audit_Log');
+        XLSX.writeFile(wb, `audit_log_${new Date().toISOString().slice(0,10)}.xlsx`);
+        showToast('ສຳເລັດ', 'ສົ່ງອອກ Audit Log ສຳເລັດ');
+    } catch (err) { showToast('ຜິດພາດ', err.message, 'error'); }
+    hideLoading();
 }
 
 // ============================================================
@@ -3669,6 +3862,269 @@ async function loadStockManagement() {
     hideLoading();
 }
 
+// ============================================================
+// RECIPE MANAGEMENT (Grid + Pagination + Search)
+// ============================================================
+let currentRecipePage = 1;
+let recipeItemsPerPage = 9;
+let recipeSearchTerm = '';
+let allMenuItemsForRecipe = [];
+
+async function loadRecipeManagement() {
+    const content = document.getElementById('content-area');
+    showLoading();
+    try {
+        const supabase = initSupabase();
+
+        // Fetch all menu items once
+        const { data: menuItemsData, error: menuError } = await supabase
+            .from('menu_items')
+            .select('id, name_lo')
+            .eq('is_available', true)
+            .order('name_lo');
+
+        if (menuError) throw menuError;
+        if (!menuItemsData || menuItemsData.length === 0) {
+            content.innerHTML = `<div class="empty-state"><i class="fas fa-utensils"></i><h3>ບໍ່ມີລາຍການອາຫານ</h3><p>ກະລຸນາສ້າງເມນູກ່ອນ</p></div>`;
+            hideLoading();
+            return;
+        }
+
+        allMenuItemsForRecipe = menuItemsData;
+        await renderRecipeGrid();
+    } catch (err) {
+        content.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><p>${err.message}</p></div>`;
+    }
+    hideLoading();
+}
+
+async function renderRecipeGrid() {
+    const content = document.getElementById('content-area');
+    
+    // Filter by search term
+    let filtered = allMenuItemsForRecipe;
+    if (recipeSearchTerm) {
+        filtered = filtered.filter(item => 
+            item.name_lo.toLowerCase().includes(recipeSearchTerm.toLowerCase())
+        );
+    }
+    
+    // Pagination
+    const totalItems = filtered.length;
+    const totalPages = Math.ceil(totalItems / recipeItemsPerPage);
+    const start = (currentRecipePage - 1) * recipeItemsPerPage;
+    const paginatedItems = filtered.slice(start, start + recipeItemsPerPage);
+    
+    // Fetch ingredients for each menu item in this page
+    const supabase = initSupabase();
+    const itemsWithIngredients = await Promise.all(paginatedItems.map(async (menu) => {
+        const { data: links } = await supabase
+            .from('menu_item_ingredients')
+            .select('*, ingredients(id, name, unit)')
+            .eq('menu_item_id', menu.id);
+        return { ...menu, links: links || [] };
+    }));
+    
+    // Generate HTML
+    const cardsHtml = itemsWithIngredients.map(menu => {
+        const ingredientsList = menu.links.length > 0
+            ? menu.links.map(link => `
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--gray-200);">
+                    <div style="font-size:0.8rem;">
+                        <strong>${link.ingredients?.name || 'ບໍ່ຮູ້ຊື່'}</strong>
+                        <span style="color:var(--gray-500);"> × ${link.quantity_used} ${link.ingredients?.unit || ''}</span>
+                    </div>
+                    <button class="btn btn-danger btn-sm" onclick="removeRecipeIngredient('${link.id}','${menu.id}')" title="ລຶບ">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            `).join('')
+            : '<div style="color:var(--gray-400); text-align:center; padding:12px; font-size:0.8rem;">ຍັງບໍ່ມີວັດຖຸດິບ</div>';
+        
+        return `
+            <div class="data-table-container" style="display:flex;flex-direction:column;height:100%;">
+                <div class="table-header" style="flex-shrink:0;">
+                    <h3 class="table-title" style="font-size:1rem;">${menu.name_lo}</h3>
+                    <button class="btn btn-primary btn-sm" onclick="showAddRecipeModal('${menu.id}','${menu.name_lo}')">
+                        <i class="fas fa-plus"></i> ເພີ່ມ
+                    </button>
+                </div>
+                <div style="padding:12px; flex-grow:1;">
+                    ${ingredientsList}
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    // Generate pagination controls
+    let paginationHtml = '';
+    if (totalPages > 1) {
+        paginationHtml = `
+            <div class="pagination" style="margin-top:20px;">
+                <button class="btn btn-outline btn-sm" onclick="changeRecipePage(${currentRecipePage - 1})" ${currentRecipePage <= 1 ? 'disabled' : ''}>
+                    <i class="fas fa-chevron-left"></i> ກ່ອນໜ້າ
+                </button>
+                <span style="padding:6px 12px;">ໜ້າ ${currentRecipePage} / ${totalPages} (${totalItems} ລາຍການ)</span>
+                <button class="btn btn-outline btn-sm" onclick="changeRecipePage(${currentRecipePage + 1})" ${currentRecipePage >= totalPages ? 'disabled' : ''}>
+                    ຕໍ່ໄປ <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+        `;
+    }
+    
+    content.innerHTML = `
+        <div class="data-table-container" style="margin-bottom:20px;">
+            <div class="table-header">
+                <h3 class="table-title"><i class="fas fa-blender"></i> ສູດອາຫານ (ຜູກວັດຖຸດິບກັບເມນູ)</h3>
+                <div class="table-actions">
+                    <input type="text" id="recipe-search" class="search-input" placeholder="ຄົ້ນຫາເມນູ..." 
+                        value="${recipeSearchTerm}" style="width:200px;">
+                </div>
+            </div>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:20px;">
+            ${cardsHtml}
+        </div>
+        ${paginationHtml}
+    `;
+    
+    // Attach search event with debounce
+    const searchInput = document.getElementById('recipe-search');
+    if (searchInput) {
+        let debounceTimer;
+        searchInput.addEventListener('input', (e) => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                recipeSearchTerm = e.target.value;
+                currentRecipePage = 1;
+                renderRecipeGrid();
+            }, 400);
+        });
+    }
+}
+
+function changeRecipePage(newPage) {
+    const totalPages = Math.ceil(allMenuItemsForRecipe.filter(i => 
+        i.name_lo.toLowerCase().includes(recipeSearchTerm.toLowerCase())
+    ).length / recipeItemsPerPage);
+    if (newPage >= 1 && newPage <= totalPages) {
+        currentRecipePage = newPage;
+        renderRecipeGrid();
+    }
+}
+
+// Show modal to add an ingredient link to a menu item
+async function showAddRecipeModal(menuItemId, menuItemName) {
+    const supabase = initSupabase();
+    // Fetch all active ingredients
+    const { data: ingredients } = await supabase
+        .from('ingredients')
+        .select('id, name, unit')
+        .eq('is_active', true)
+        .order('name');
+
+    if (!ingredients || ingredients.length === 0) {
+        showToast('ແຈ້ງເຕືອນ', 'ຍັງບໍ່ມີວັດຖຸດິບໃນລະບົບ', 'warning');
+        return;
+    }
+
+    const modal = document.createElement('div');
+    modal.className = 'modal show';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:450px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-link"></i> ເພີ່ມວັດຖຸດິບໃສ່ ${menuItemName}</h3>
+                <button class="close-btn" onclick="this.closest('.modal').remove()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>ເລືອກວັດຖຸດິບ <span class="required">*</span></label>
+                    <select id="recipe-ingredient-id" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:8px;">
+                        <option value="">-- ເລືອກ --</option>
+                        ${ingredients.map(ing => `<option value="${ing.id}">${ing.name} (${ing.unit})</option>`).join('')}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>ຈຳນວນທີ່ໃຊ້ຕໍ່ 1 ຈານ <span class="required">*</span></label>
+                    <input type="number" id="recipe-quantity" step="any" min="0.01" value="1" placeholder="1">
+                </div>
+                <small style="color:var(--gray-500);">ຕົວຢ່າງ: ຊີ້ນໝູ 0.2 kg, ຜັກຫອມ 0.05 kg</small>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">ຍົກເລີກ</button>
+                <button class="btn btn-primary" onclick="saveRecipeIngredient('${menuItemId}')">ບັນທຶກ</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
+// Save the new recipe line
+async function saveRecipeIngredient(menuItemId) {
+    const ingredientId = document.getElementById('recipe-ingredient-id')?.value;
+    const quantity = parseFloat(document.getElementById('recipe-quantity')?.value);
+
+    if (!ingredientId) {
+        showToast('ແຈ້ງເຕືອນ', 'ກະລຸນາເລືອກວັດຖຸດິບ', 'warning');
+        return;
+    }
+    if (!quantity || quantity <= 0) {
+        showToast('ແຈ້ງເຕືອນ', 'ກະລຸນາປ້ອນຈຳນວນທີ່ຖືກຕ້ອງ', 'warning');
+        return;
+    }
+
+    const supabase = initSupabase();
+    showLoading();
+    try {
+        // Check if already linked
+        const { data: existing } = await supabase
+            .from('menu_item_ingredients')
+            .select('id')
+            .eq('menu_item_id', menuItemId)
+            .eq('ingredient_id', ingredientId)
+            .maybeSingle();
+
+        if (existing) {
+            showToast('ແຈ້ງເຕືອນ', 'ວັດຖຸດິບນີ້ຖືກເພີ່ມແລ້ວ (ກະລຸນາແກ້ໄຂຈຳນວນຜ່ານການລຶບ ແລະ ເພີ່ມໃໝ່)', 'warning');
+            hideLoading();
+            return;
+        }
+
+        await supabase.from('menu_item_ingredients').insert([{
+            menu_item_id: menuItemId,
+            ingredient_id: ingredientId,
+            quantity_used: quantity
+        }]);
+
+        await writeAuditLog('ADD_RECIPE', 'menu_item_ingredients', `${menuItemId}-${ingredientId}`,
+            null, { menu_item_id: menuItemId, ingredient_id: ingredientId, quantity_used: quantity });
+
+        document.querySelector('.modal.show')?.remove();
+        showToast('ສຳເລັດ', 'ເພີ່ມວັດຖຸດິບເຂົ້າສູດສຳເລັດ');
+        loadRecipeManagement();
+    } catch (err) {
+        showToast('ຜິດພາດ', err.message, 'error');
+    }
+    hideLoading();
+}
+
+// Remove a recipe line
+async function removeRecipeIngredient(linkId, menuItemId) {
+    if (!confirm('ທ່ານຕ້ອງການລຶບວັດຖຸດິບນີ້ອອກຈາກສູດແທ້ບໍ?')) return;
+    const supabase = initSupabase();
+    showLoading();
+    try {
+        await supabase.from('menu_item_ingredients').delete().eq('id', linkId);
+        await writeAuditLog('DELETE_RECIPE', 'menu_item_ingredients', linkId,
+            { menu_item_id: menuItemId }, null);
+        showToast('ສຳເລັດ', 'ລຶບວັດຖຸດິບອອກຈາກສູດແລ້ວ');
+        loadRecipeManagement();
+    } catch (err) {
+        showToast('ຜິດພາດ', err.message, 'error');
+    }
+    hideLoading();
+}
+
 function showAddIngredientModal() {
     const modal = document.createElement('div');
     modal.className = 'modal show';
@@ -3798,6 +4254,8 @@ async function markAsPaid(orderId) {
 // ============================================================
 window.loadAuditLog            = loadAuditLog;
 window.filterAuditLog          = filterAuditLog;
+window.applyAuditFilters       = applyAuditFilters;
+window.exportAuditLog          = exportAuditLog;
 window.loadVoucherManagement   = loadVoucherManagement;
 window.showAddVoucherModal     = showAddVoucherModal;
 window.updateVoucherValueLabel = updateVoucherValueLabel;
