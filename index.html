@@ -3144,7 +3144,7 @@ async function writeAuditLog(action, tableName, recordId, oldData = null, newDat
 // ============================================================
 // AUDIT LOG PAGE (Admin only)
 // ============================================================
-async function loadAuditLog() {
+        async function loadAuditLog() {
     const content = document.getElementById('content-area');
     showLoading();
     try {
@@ -3170,17 +3170,21 @@ async function loadAuditLog() {
                         </thead>
                         <tbody id="audit-tbody">
                             ${!logs || logs.length === 0
-                                ? `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--gray-400);">ຍັງບໍ່ມີ Log</td></tr>`
-                                : logs.map(l => `
+                                ? `<td><td colspan="7" style="text-align:center;padding:40px;color:var(--gray-400);">ຍັງບໍ່ມີ Log</td></tr>`
+                                : logs.map(l => {
+                                    const oldDataStr = l.old_data ? JSON.stringify(l.old_data) : '-';
+                                    const newDataStr = l.new_data ? JSON.stringify(l.new_data) : '-';
+                                    return `
                                     <tr data-search="${(l.user_name||'').toLowerCase()} ${(l.action||'').toLowerCase()}">
                                         <td style="font-size:0.75rem;white-space:nowrap;">${formatDateTime(l.created_at)}</td>
                                         <td><strong>${l.user_name || '-'}</strong></td>
                                         <td><span class="status-badge status-info" style="background:var(--info-light);color:var(--info);">${l.action || '-'}</span></td>
                                         <td style="font-size:0.75rem;">${l.table_name || '-'}</td>
                                         <td style="font-size:0.7rem;color:var(--gray-500);">${(l.record_id||'').slice(0,12)}...</td>
-                                        <td style="font-size:0.7rem;max-width:150px;overflow:hidden;">${l.old_data ? JSON.stringify(l.old_data).slice(0,60) : '-'}</td>
-                                        <td style="font-size:0.7rem;max-width:150px;overflow:hidden;">${l.new_data ? JSON.stringify(l.new_data).slice(0,60) : '-'}</td>
-                                    </tr>`).join('')}
+                                        <td style="font-size:0.7rem;max-width:200px;word-break:break-word;" title="${oldDataStr.replace(/"/g, '&quot;')}">${oldDataStr.length > 50 ? oldDataStr.substring(0,50)+'...' : oldDataStr}</td>
+                                        <td style="font-size:0.7rem;max-width:200px;word-break:break-word;" title="${newDataStr.replace(/"/g, '&quot;')}">${newDataStr.length > 50 ? newDataStr.substring(0,50)+'...' : newDataStr}</td>
+                                    </tr>`;
+                                }).join('')}
                         </tbody>
                     </table>
                 </div>
@@ -3190,7 +3194,6 @@ async function loadAuditLog() {
     }
     hideLoading();
 }
-
 function filterAuditLog(q) {
     document.querySelectorAll('#audit-tbody tr[data-search]').forEach(row => {
         row.style.display = row.dataset.search.includes(q.toLowerCase()) ? '' : 'none';
