@@ -1540,7 +1540,7 @@ function changeOrdersPerPage() {
         // 1. Get all active (non-cancelled) items with their subtotals
         const { data: activeItems, error: itemsCheck } = await supabase
             .from('order_items')
-            .select('id, subtotal, status')
+            .select('subtotal')
             .eq('order_id', orderId)
             .neq('status', 'cancelled');
         
@@ -1555,34 +1555,30 @@ function changeOrdersPerPage() {
         // 2. Calculate the correct total from active items
         const correctTotal = activeItems.reduce((sum, item) => sum + (item.subtotal || 0), 0);
         
-        console.log('Confirming order, recalculated total:', correctTotal);
-        
-        // 3. Update order status AND total (force the correct total)
-        const { error: updateOrderError } = await supabase
+        // 3. Update order status AND total in one call
+        const { error: updateError } = await supabase
             .from('orders')
             .update({ 
                 status: 'confirmed', 
                 confirmed_at: new Date().toISOString(),
-                total_amount: correctTotal   // ← explicit total from active items
+                total_amount: correctTotal   // ← force the correct total
             })
             .eq('id', orderId);
         
-        if (updateOrderError) throw updateOrderError;
+        if (updateError) throw updateError;
         
         // 4. Update only non-cancelled items to confirmed
-        const { error: updateItemsError } = await supabase
+        await supabase
             .from('order_items')
             .update({ status: 'confirmed' })
             .eq('order_id', orderId)
             .neq('status', 'cancelled');
         
-        if (updateItemsError) throw updateItemsError;
-        
         showToast('ສຳເລັດ', 'ຢືນຢັນຄຳສັ່ງ — ສົ່ງໄປຄົວແລ້ວ');
         await writeAuditLog('CONFIRM_ORDER', 'orders', orderId,
             { status: 'pending' }, { status: 'confirmed', total: correctTotal });
         
-        // 5. Refresh all relevant pages
+        // Refresh views
         await loadAllOrders(currentOrdersPage);
         if (currentPage === 'kds') await loadKDS();
         
@@ -1592,6 +1588,7 @@ function changeOrdersPerPage() {
     }
     hideLoading();
 }
+		
 async function markAsPaid(orderId) {
     const supabase = initSupabase();
     showLoading();
