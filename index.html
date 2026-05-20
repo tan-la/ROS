@@ -1534,7 +1534,6 @@ function changeOrdersPerPage() {
 
 // ===== ORDER ACTIONS =====
 		async function confirmOrder(orderId) {
-    console.log("confirmOrder called for order:", orderId);
     const supabase = initSupabase();
     showLoading();
     try {
@@ -1545,18 +1544,12 @@ function changeOrdersPerPage() {
             .eq('id', orderId)
             .single();
         if (fetchError) throw fetchError;
-        
-        console.log("Order status:", order.status);
-        if (order.status !== 'pending') {
-            throw new Error(`Order status is ${order.status}, cannot confirm.`);
-        }
 
-        // 2. Calculate total from ACTIVE (non-cancelled) items
-        const activeItems = (order.order_items || []).filter(i => i.status !== 'cancelled');
-        const newTotal = activeItems.reduce((sum, i) => sum + (i.subtotal || 0), 0);
-        console.log("New total (active items):", newTotal);
+        // 2. Calculate total from non-cancelled items only
+        const activeItems = (order.order_items || []).filter(item => item.status !== 'cancelled');
+        const newTotal = activeItems.reduce((sum, item) => sum + (item.subtotal || 0), 0);
 
-        // 3. Update order status and total
+        // 3. Update order: status + total + confirmed_at
         const { error: updateError } = await supabase
             .from('orders')
             .update({
@@ -1567,7 +1560,7 @@ function changeOrdersPerPage() {
             .eq('id', orderId);
         if (updateError) throw updateError;
 
-        // 4. Update all active items to 'confirmed'
+        // 4. (Optional) Update each active item's status to 'confirmed'
         if (activeItems.length > 0) {
             const { error: itemsError } = await supabase
                 .from('order_items')
@@ -1583,8 +1576,8 @@ function changeOrdersPerPage() {
         );
 
         showToast('ສຳເລັດ', `ຢືນຢັນຄຳສັ່ງ — ສົ່ງໄປຄົວແລ້ວ (ຍອດ: ${formatCurrency(newTotal)})`);
-        
-        // Force refresh of the current page
+
+        // Refresh the current page
         if (currentPage === 'orders') {
             await loadAllOrders(currentOrdersPage);
         } else if (currentPage === 'dashboard') {
@@ -1592,10 +1585,10 @@ function changeOrdersPerPage() {
         } else if (currentPage === 'kds') {
             await loadKDS();
         }
-        
-        // Also close any open modal
+
+        // Close the order detail modal if open
         document.querySelector('.modal.show')?.remove();
-        
+
     } catch (err) {
         console.error('confirmOrder error:', err);
         showToast('ຜິດພາດ', err.message, 'error');
