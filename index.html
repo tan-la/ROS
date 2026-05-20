@@ -3792,7 +3792,7 @@ async function applyPaymentVoucher(originalTotal) {
 //   ingredients (id, name, unit, current_stock, minimum_stock, cost_per_unit, is_active)
 //   menu_item_ingredients (id, menu_item_id, ingredient_id, quantity_used)
 // ============================================================
-async function loadStockManagement() {
+		async function loadStockManagement() {
     const content = document.getElementById('content-area');
     showLoading();
     try {
@@ -3828,7 +3828,7 @@ async function loadStockManagement() {
                         </thead>
                         <tbody>
                             ${!ingredients || ingredients.length === 0
-                                ? `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--gray-400);">ຍັງບໍ່ມີວັດຖຸດິບ</td></tr>`
+                                ? `</tr><td colspan="7" style="text-align:center;padding:40px;color:var(--gray-400);">ຍັງບໍ່ມີວັດຖຸດິບ</td></tr>`
                                 : ingredients.map(ing => {
                                     const isLow = ing.current_stock <= ing.minimum_stock;
                                     return `
@@ -3839,9 +3839,15 @@ async function loadStockManagement() {
                                         <td style="color:var(--gray-500);">${ing.minimum_stock}</td>
                                         <td>${formatCurrency(ing.cost_per_unit || 0)}</td>
                                         <td><span class="status-badge ${isLow ? 'status-cancelled' : 'status-success'}">${isLow ? 'ໃກ້ໝົດ' : 'ປົກກະຕິ'}</span></td>
-                                        <td>
-                                            <button class="btn btn-primary btn-sm" onclick="showRestockModal('${ing.id}','${ing.name}',${ing.current_stock})">
+                                        <td style="white-space:nowrap;">
+                                            <button class="btn btn-primary btn-sm" onclick="showRestockModal('${ing.id}','${ing.name}',${ing.current_stock})" style="margin-right:4px;">
                                                 <i class="fas fa-plus-circle"></i> ເຕີມ
+                                            </button>
+                                            <button class="btn btn-warning btn-sm" onclick="editIngredient('${ing.id}')" style="margin-right:4px;">
+                                                <i class="fas fa-edit"></i> ແກ້ໄຂ
+                                            </button>
+                                            <button class="btn btn-danger btn-sm" onclick="deleteIngredient('${ing.id}','${ing.name}')">
+                                                <i class="fas fa-trash"></i> ລຶບ
                                             </button>
                                         </td>
                                     </tr>`;
@@ -3856,6 +3862,119 @@ async function loadStockManagement() {
     hideLoading();
 }
 
+		async function editIngredient(ingredientId) {
+    const supabase = initSupabase();
+    showLoading();
+    const { data: ingredient, error } = await supabase
+        .from('ingredients')
+        .select('*')
+        .eq('id', ingredientId)
+        .single();
+    hideLoading();
+    if (error || !ingredient) {
+        showToast('ຜິດພາດ', 'ບໍ່ພົບຂໍ້ມູນວັດຖຸດິບ', 'error');
+        return;
+    }
+
+    const modal = document.createElement('div');
+    modal.className = 'modal show';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:480px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-edit"></i> ແກ້ໄຂວັດຖຸດິບ</h3>
+                <button class="close-btn" onclick="this.closest('.modal').remove()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group"><label>ຊື່ວັດຖຸດິບ <span class="required">*</span></label><input type="text" id="edit_ing_name" value="${ingredient.name}"></div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>ໜ່ວຍ</label>
+                        <select id="edit_ing_unit">
+                            <option value="kg" ${ingredient.unit === 'kg' ? 'selected' : ''}>kg (ກິໂລ)</option>
+                            <option value="g" ${ingredient.unit === 'g' ? 'selected' : ''}>g (ກຣາມ)</option>
+                            <option value="L" ${ingredient.unit === 'L' ? 'selected' : ''}>L (ລິດ)</option>
+                            <option value="ml" ${ingredient.unit === 'ml' ? 'selected' : ''}>ml (ມິນລີລິດ)</option>
+                            <option value="pcs" ${ingredient.unit === 'pcs' ? 'selected' : ''}>pcs (ອັນ)</option>
+                            <option value="pack" ${ingredient.unit === 'pack' ? 'selected' : ''}>pack (ຊອງ)</option>
+                        </select>
+                    </div>
+                    <div class="form-group"><label>ສະຕ໋ອກປັດຈຸບັນ</label><input type="number" id="edit_ing_stock" min="0" value="${ingredient.current_stock}" step="any"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>ສະຕ໋ອກຂັ້ນຕໍ່າ (ແຈ້ງເຕືອນ)</label><input type="number" id="edit_ing_min" min="0" value="${ingredient.minimum_stock}"></div>
+                    <div class="form-group"><label>ລາຄາ/ໜ່ວຍ (₭)</label><input type="number" id="edit_ing_cost" min="0" value="${ingredient.cost_per_unit || 0}"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">ຍົກເລີກ</button>
+                <button class="btn btn-primary" onclick="updateIngredient('${ingredientId}')"><i class="fas fa-save"></i> ບັນທຶກ</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+}
+
+async function updateIngredient(ingredientId) {
+    const supabase = initSupabase();
+    const name = document.getElementById('edit_ing_name')?.value.trim();
+    const unit = document.getElementById('edit_ing_unit')?.value;
+    const current_stock = parseFloat(document.getElementById('edit_ing_stock')?.value) || 0;
+    const minimum_stock = parseFloat(document.getElementById('edit_ing_min')?.value) || 1;
+    const cost_per_unit = parseFloat(document.getElementById('edit_ing_cost')?.value) || 0;
+
+    if (!name) {
+        showToast('ແຈ້ງເຕືອນ', 'ກະລຸນາປ້ອນຊື່ວັດຖຸດິບ', 'warning');
+        return;
+    }
+    showLoading();
+    try {
+        const { error } = await supabase
+            .from('ingredients')
+            .update({ name, unit, current_stock, minimum_stock, cost_per_unit })
+            .eq('id', ingredientId);
+        if (error) throw error;
+        await writeAuditLog('UPDATE_INGREDIENT', 'ingredients', ingredientId, null, { name, unit, current_stock, minimum_stock, cost_per_unit });
+        document.querySelector('.modal.show')?.remove();
+        showToast('ສຳເລັດ', 'ອັບເດດວັດຖຸດິບສຳເລັດ');
+        loadStockManagement();
+    } catch (err) {
+        showToast('ຜິດພາດ', err.message, 'error');
+    }
+    hideLoading();
+}
+
+		async function deleteIngredient(ingredientId, ingredientName) {
+    if (!confirm(`ທ່ານຕ້ອງການລຶບວັດຖຸດິບ "${ingredientName}" ແທ້ບໍ? (ຈະຖືກລຶບອອກຈາກສູດອາຫານທີ່ໃຊ້ມັນ)`)) return;
+
+    const supabase = initSupabase();
+    showLoading();
+    try {
+        // Check if used in any recipe
+        const { data: usedIn, error: checkError } = await supabase
+            .from('menu_item_ingredients')
+            .select('id')
+            .eq('ingredient_id', ingredientId)
+            .limit(1);
+        if (checkError) throw checkError;
+        if (usedIn && usedIn.length > 0) {
+            if (!confirm(`ວັດຖຸດິບນີ້ຖືກໃຊ້ໃນສູດອາຫານ. ລຶບມັນຈະລຶບການເຊື່ອມໂຍງນີ້. ທ່ານຕ້ອງການດຳເນີນການຕໍ່ບໍ?`)) {
+                hideLoading();
+                return;
+            }
+            // Delete linked recipe entries
+            await supabase.from('menu_item_ingredients').delete().eq('ingredient_id', ingredientId);
+        }
+        // Delete ingredient
+        const { error } = await supabase.from('ingredients').delete().eq('id', ingredientId);
+        if (error) throw error;
+        await writeAuditLog('DELETE_INGREDIENT', 'ingredients', ingredientId, { name: ingredientName }, null);
+        showToast('ສຳເລັດ', `ລຶບວັດຖຸດິບ "${ingredientName}" ສຳເລັດ`);
+        loadStockManagement();
+    } catch (err) {
+        showToast('ຜິດພາດ', err.message, 'error');
+    }
+    hideLoading();
+}
+		
 // ============================================================
 // RECIPE MANAGEMENT (Grid + Pagination + Search)
 // ============================================================
@@ -4265,6 +4384,9 @@ window.showAddIngredientModal  = showAddIngredientModal;
 window.saveIngredient          = saveIngredient;
 window.showRestockModal        = showRestockModal;
 window.restockIngredient       = restockIngredient;
+window.editIngredient = editIngredient;
+window.updateIngredient = updateIngredient;
+window.deleteIngredient = deleteIngredient;
 
     </script>
 </body>
