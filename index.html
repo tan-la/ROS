@@ -2028,33 +2028,52 @@ window.changeOrderTable      = changeOrderTable;
 // ============================================
 // REPORTS WITH PAGINATION
 // ============================================
-async function loadReports(page = 1) {
+		async function loadReports(page = 1) {
     const content = document.getElementById('content-area');
     showLoading();
     try {
         const supabase = initSupabase();
 
-        const { count: total } = await supabase
-            .from('orders').select('*', { count: 'exact', head: true }).eq('status', 'paid');
-        totalReports = total || 0;
+        // --- Determine date range based on current filters (same as orders) ---
+        let startDate = null, endDate = null;
+        if (currentOrderDateRangeType === 'last7') {
+            const d = new Date();
+            d.setDate(d.getDate() - 7);
+            startDate = d.toISOString().split('T')[0];
+            endDate = new Date().toISOString().split('T')[0];
+        } else if (currentOrderDateRangeType === 'this_month') {
+            const now = new Date();
+            startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+            endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+        } else if (currentOrderDateRangeType === 'last_month') {
+            const now = new Date();
+            startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0];
+            endDate = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split('T')[0];
+        } else if (currentOrderDateFilter) {
+            startDate = currentOrderDateFilter;
+            endDate = currentOrderDateFilter;
+        }
 
-        const start = (page - 1) * reportsPerPage;
-        const end   = start + reportsPerPage - 1;
+        // --- Revenue query (paid orders) ---
+        let revenueQuery = supabase.from('orders').select('total_amount, paid_at').eq('status', 'paid');
+        if (startDate) revenueQuery = revenueQuery.gte('paid_at', startDate);
+        if (endDate) revenueQuery = revenueQuery.lte('paid_at', endDate);
+        const { data: revenueData } = await revenueQuery;
+        const totalRevenue = (revenueData || []).reduce((s, o) => s + (o.total_amount || 0), 0);
 
-        const { data: orders, error } = await supabase
-            .from('orders')
-            .select('*, restaurant_tables(table_number)')
-            .eq('status', 'paid')
-            .order('paid_at', { ascending: false })
-            .range(start, end);
+        // --- Expenses query ---
+        let expenseQuery = supabase.from('expenses').select('*');
+        if (startDate) expenseQuery = expenseQuery.gte('expense_date', startDate);
+        if (endDate) expenseQuery = expenseQuery.lte('expense_date', endDate);
+        const { data: expenses } = await expenseQuery.order('expense_date', { ascending: false });
+        const totalExpenses = (expenses || []).reduce((s, e) => s + (e.amount || 0), 0);
+        const netProfit = totalRevenue - totalExpenses;
+        const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue * 100).toFixed(2) : 0;
 
-        if (error) throw error;
+        // --- Pagination for expenses (optional, keep simple for now) ---
+        // Reuse existing pagination from reports? We'll just show all expenses in period.
 
-        const totalRevenue = (orders || []).reduce((s, o) => s + (o.total_amount || 0), 0);
-        const today        = new Date().toISOString().split('T')[0];
-        const todayRevenue = (orders || []).filter(o => o.paid_at?.startsWith(today)).reduce((s, o) => s + (o.total_amount || 0), 0);
-        const totalPages   = Math.max(1, Math.ceil(totalReports / reportsPerPage));
-
+        // Build HTML (keep existing stats cards, add profit card)
         content.innerHTML = `
             <div class="data-table-container">
                 <div class="table-header">
@@ -2069,60 +2088,89 @@ async function loadReports(page = 1) {
                         <button class="btn btn-outline btn-sm" onclick="exportFinancialReport()">
                             <i class="fas fa-download"></i> ສົ່ງອອກ Excel
                         </button>
+                        ${currentUser.role === 'admin' ? `
+                        <button class="btn btn-primary btn-sm" onclick="showAddExpenseModal()">
+                            <i class="fas fa-plus"></i> ເພີ່ມລາຍຈ່າຍ
+                        </button>
+                        ` : ''}
                     </div>
                 </div>
 
+                <!-- Stats row with 4 cards -->
                 <div class="dashboard-stats" style="padding:20px;margin:0;border-bottom:1px solid var(--gray-200);">
                     <div class="stat-card" style="border-left-color:var(--success);">
-                        <div class="stat-header"><span class="stat-label">ລາຍຮັບທັງໝົດ (ໜ້ານີ້)</span><div class="stat-icon" style="background:var(--success-light);color:var(--success);"><i class="fas fa-chart-line"></i></div></div>
+                        <div class="stat-header"><span class="stat-label">ລາຍຮັບທັງໝົດ</span><div class="stat-icon" style="background:var(--success-light);color:var(--success);"><i class="fas fa-chart-line"></i></div></div>
                         <div class="stat-value" style="font-size:1.2rem;">${formatCurrency(totalRevenue)}</div>
                     </div>
+                    <div class="stat-card" style="border-left-color:var(--danger);">
+                        <div class="stat-header"><span class="stat-label">ລາຍຈ່າຍທັງໝົດ</span><div class="stat-icon" style="background:var(--danger-light);color:var(--danger);"><i class="fas fa-receipt"></i></div></div>
+                        <div class="stat-value" style="font-size:1.2rem;">${formatCurrency(totalExpenses)}</div>
+                    </div>
                     <div class="stat-card" style="border-left-color:var(--primary);">
-                        <div class="stat-header"><span class="stat-label">ລາຍຮັບມື້ນີ້</span><div class="stat-icon"><i class="fas fa-calendar-day"></i></div></div>
-                        <div class="stat-value" style="font-size:1.2rem;">${formatCurrency(todayRevenue)}</div>
+                        <div class="stat-header"><span class="stat-label">ກຳໄລສຸດທິ</span><div class="stat-icon"><i class="fas fa-chart-simple"></i></div></div>
+                        <div class="stat-value" style="font-size:1.2rem;color:${netProfit >= 0 ? 'var(--success)' : 'var(--danger)'};">${formatCurrency(netProfit)}</div>
                     </div>
                     <div class="stat-card" style="border-left-color:var(--info);">
-                        <div class="stat-header"><span class="stat-label">ຈຳນວນຄຳສັ່ງທັງໝົດ</span><div class="stat-icon" style="background:var(--info-light);color:var(--info);"><i class="fas fa-clipboard-check"></i></div></div>
-                        <div class="stat-value">${totalReports}</div>
+                        <div class="stat-header"><span class="stat-label">ອັດຕາກຳໄລ</span><div class="stat-icon" style="background:var(--info-light);color:var(--info);"><i class="fas fa-percent"></i></div></div>
+                        <div class="stat-value" style="font-size:1.2rem;">${profitMargin}%</div>
                     </div>
                 </div>
 
-                <div style="overflow-x:auto;">
+                <!-- Revenue table (existing) -->
+                <div style="overflow-x:auto; margin-top:20px;">
+                    <h4 style="padding:12px 16px; margin:0;"><i class="fas fa-money-bill-wave"></i> ລາຍຮັບ</h4>
                     <table class="data-table" style="width:100%;">
-                        <thead>
-                            <tr><th>ເລກຄຳສັ່ງ</th><th>ໂຕະ</th><th>ລູກຄ້າ</th><th>ວັນທີຊຳລະ</th><th>ຍອດລວມ</th><th>ຈັດການ</th></tr>
-                        </thead>
+                        <thead><tr><th>ເລກຄຳສັ່ງ</th><th>ໂຕະ</th><th>ລູກຄ້າ</th><th>ວັນທີຊຳລະ</th><th>ຍອດລວມ</th><th>ຈັດການ</th></tr></thead>
                         <tbody>
-                            ${!orders || orders.length === 0
-                                ? `<tr><td colspan="6" style="text-align:center;padding:60px;color:var(--gray-400);"><i class="fas fa-chart-line" style="font-size:2rem;display:block;margin-bottom:8px;"></i>ຍັງບໍ່ມີລາຍງານ</td></tr>`
-                                : orders.map(o => `
+                            ${!revenueData || revenueData.length === 0
+                                ? `<tr><td colspan="6" style="text-align:center;padding:60px;color:var(--gray-400);">ຍັງບໍ່ມີລາຍຮັບ</td></tr>`
+                                : revenueData.map(o => `
                                     <tr>
                                         <td><strong>${o.order_number || '-'}</strong></td>
-                                        <td>ໂຕະ ${o.restaurant_tables?.table_number || '-'}</td>
+                                        <td>${o.restaurant_tables?.table_number || '-'}</td>
                                         <td>${o.customer_name || '-'}</td>
-                                        <td style="font-size:0.8rem;color:var(--gray-500);">${formatDateTime(o.paid_at || o.created_at)}</td>
+                                        <td>${formatDateTime(o.paid_at)}</td>
                                         <td style="font-weight:700;color:var(--primary);">${formatCurrency(o.total_amount)}</td>
                                         <td><button class="btn btn-outline btn-sm" onclick="printReceipt('${o.id}')"><i class="fas fa-print"></i></button></td>
-                                    </tr>`).join('')}
+                                    </tr>
+                                `).join('')}
                         </tbody>
                     </table>
                 </div>
-                <div class="pagination">
-                    <button class="btn btn-outline btn-sm" onclick="changeReportsPage(${page-1})" ${page<=1?'disabled':''}>
-                        <i class="fas fa-chevron-left"></i> ກ່ອນໜ້າ
-                    </button>
-                    <span style="padding:6px 12px;font-size:0.875rem;">ໜ້າ ${page} / ${totalPages} &nbsp;(ທັງໝົດ ${totalReports} ລາຍການ)</span>
-                    <button class="btn btn-outline btn-sm" onclick="changeReportsPage(${page+1})" ${page>=totalPages?'disabled':''}>
-                        ຕໍ່ໄປ <i class="fas fa-chevron-right"></i>
-                    </button>
+
+                <!-- Expenses table -->
+                <div style="overflow-x:auto; margin-top:30px;">
+                    <h4 style="padding:12px 16px; margin:0;"><i class="fas fa-receipt"></i> ລາຍຈ່າຍ</h4>
+                    <table class="data-table" style="width:100%;">
+                        <thead><tr><th>ວັນທີ</th><th>ໝວດໝູ່</th><th>ລາຍລະອຽດ</th><th>ຈຳນວນເງິນ</th>${currentUser.role === 'admin' ? '<th>ຈັດການ</th>' : ''}</tr></thead>
+                        <tbody>
+                            ${!expenses || expenses.length === 0
+                                ? `<tr><td colspan="${currentUser.role === 'admin' ? 5 : 4}" style="text-align:center;padding:40px;color:var(--gray-400);">ຍັງບໍ່ມີລາຍຈ່າຍ</td></tr>`
+                                : expenses.map(e => `
+                                    <tr>
+                                        <td>${formatDateTime(e.expense_date)}</td>
+                                        <td>${e.category}</td>
+                                        <td>${e.description || '-'}</td>
+                                        <td style="color:var(--danger); font-weight:600;">${formatCurrency(e.amount)}</td>
+                                        ${currentUser.role === 'admin' ? `
+                                        <td>
+                                            <button class="btn btn-warning btn-sm" onclick="editExpense('${e.id}')"><i class="fas fa-edit"></i></button>
+                                            <button class="btn btn-danger btn-sm" onclick="deleteExpense('${e.id}')"><i class="fas fa-trash"></i></button>
+                                        </td>
+                                        ` : ''}
+                                    </tr>
+                                `).join('')}
+                        </tbody>
+                    </table>
                 </div>
-            </div>`;
+            </div>
+        `;
     } catch (err) {
         content.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-triangle"></i><p>${err.message}</p></div>`;
     }
     hideLoading();
 }
-
+		
 function changeReportsPage(newPage) {
     const totalPages = Math.ceil(totalReports / reportsPerPage);
     if (newPage < 1 || newPage > totalPages) return;
@@ -2135,35 +2183,257 @@ function changeReportsPerPage() {
     if (el) { reportsPerPage = parseInt(el.value); currentReportsPage = 1; loadReports(1); }
 }
 
-async function exportFinancialReport() {
+		async function showAddExpenseModal() {
+    if (currentUser.role !== 'admin') {
+        showToast('ແຈ້ງເຕືອນ', 'ສະເພາະຜູ້ບໍລິຫານເທົ່ານັ້ນທີ່ສາມາດເພີ່ມລາຍຈ່າຍ', 'warning');
+        return;
+    }
+    const modal = document.createElement('div');
+    modal.className = 'modal show';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:450px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-plus-circle"></i> ເພີ່ມລາຍຈ່າຍ</h3>
+                <button class="close-btn" onclick="this.closest('.modal').remove()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>ຈຳນວນເງິນ (₭) <span class="required">*</span></label>
+                    <input type="number" id="expense_amount" min="0" step="1000" value="0">
+                </div>
+                <div class="form-group">
+                    <label>ໝວດໝູ່ <span class="required">*</span></label>
+                    <select id="expense_category">
+                        <option value="ວັດຖຸດິບ">ວັດຖຸດິບ (Ingredients)</option>
+                        <option value="ເງິນເດືອນ">ເງິນເດືອນ (Salaries)</option>
+                        <option value="ຄ່າເຊົ່າ">ຄ່າເຊົ່າ (Rent)</option>
+                        <option value="ຄ່າໄຟຟ້າ/ນ້ຳ">ຄ່າໄຟຟ້າ/ນ້ຳ (Utilities)</option>
+                        <option value="ອື່ນໆ">ອື່ນໆ (Other)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>ລາຍລະອຽດ</label>
+                    <input type="text" id="expense_description" placeholder="ຊື້ວັດຖຸດິບ...">
+                </div>
+                <div class="form-group">
+                    <label>ວັນທີ</label>
+                    <input type="date" id="expense_date" value="${new Date().toISOString().split('T')[0]}">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">ຍົກເລີກ</button>
+                <button class="btn btn-primary" onclick="saveExpense()"><i class="fas fa-save"></i> ບັນທຶກ</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+}
+
+async function saveExpense() {
+    const amount = parseFloat(document.getElementById('expense_amount')?.value);
+    const category = document.getElementById('expense_category')?.value;
+    const description = document.getElementById('expense_description')?.value.trim();
+    const expense_date = document.getElementById('expense_date')?.value;
+
+    if (!amount || amount <= 0) {
+        showToast('ແຈ້ງເຕືອນ', 'ກະລຸນາປ້ອນຈຳນວນເງິນທີ່ຖືກຕ້ອງ', 'warning');
+        return;
+    }
+    if (!category) {
+        showToast('ແຈ້ງເຕືອນ', 'ກະລຸນາເລືອກໝວດໝູ່', 'warning');
+        return;
+    }
+
+    const supabase = initSupabase();
     showLoading();
     try {
-        const supabase = initSupabase();
-        const { data: orders } = await supabase
-            .from('orders').select('*, restaurant_tables(table_number)').eq('status', 'paid').order('paid_at', { ascending: false });
+        const { error } = await supabase.from('expenses').insert([{
+            amount,
+            category,
+            description,
+            expense_date,
+            created_by: currentUser.id
+        }]);
+        if (error) throw error;
+        await writeAuditLog('ADD_EXPENSE', 'expenses', null, null, { amount, category, description, expense_date });
+        document.querySelector('.modal.show')?.remove();
+        showToast('ສຳເລັດ', 'ເພີ່ມລາຍຈ່າຍສຳເລັດ');
+        loadReports(currentReportsPage);  // refresh the report page
+    } catch (err) {
+        showToast('ຜິດພາດ', err.message, 'error');
+    }
+    hideLoading();
+}
+		async function editExpense(expenseId) {
+    if (currentUser.role !== 'admin') {
+        showToast('ແຈ້ງເຕືອນ', 'ສະເພາະຜູ້ບໍລິຫານເທົ່ານັ້ນ', 'warning');
+        return;
+    }
+    const supabase = initSupabase();
+    showLoading();
+    const { data: expense, error } = await supabase
+        .from('expenses').select('*').eq('id', expenseId).single();
+    hideLoading();
+    if (error || !expense) {
+        showToast('ຜິດພາດ', 'ບໍ່ພົບລາຍຈ່າຍ', 'error');
+        return;
+    }
 
-        if (!orders || orders.length === 0) {
-            showToast('ແຈ້ງເຕືອນ', 'ບໍ່ມີຂໍ້ມູນສຳລັບສົ່ງອອກ', 'warning');
-            hideLoading(); return;
-        }
+    const modal = document.createElement('div');
+    modal.className = 'modal show';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:450px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-edit"></i> ແກ້ໄຂລາຍຈ່າຍ</h3>
+                <button class="close-btn" onclick="this.closest('.modal').remove()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>ຈຳນວນເງິນ (₭) *</label>
+                    <input type="number" id="edit_expense_amount" min="0" step="1000" value="${expense.amount}">
+                </div>
+                <div class="form-group">
+                    <label>ໝວດໝູ່ *</label>
+                    <select id="edit_expense_category">
+                        <option value="ວັດຖຸດິບ" ${expense.category === 'ວັດຖຸດິບ' ? 'selected' : ''}>ວັດຖຸດິບ</option>
+                        <option value="ເງິນເດືອນ" ${expense.category === 'ເງິນເດືອນ' ? 'selected' : ''}>ເງິນເດືອນ</option>
+                        <option value="ຄ່າເຊົ່າ" ${expense.category === 'ຄ່າເຊົ່າ' ? 'selected' : ''}>ຄ່າເຊົ່າ</option>
+                        <option value="ຄ່າໄຟຟ້າ/ນ້ຳ" ${expense.category === 'ຄ່າໄຟຟ້າ/ນ້ຳ' ? 'selected' : ''}>ຄ່າໄຟຟ້າ/ນ້ຳ</option>
+                        <option value="ອື່ນໆ" ${expense.category === 'ອື່ນໆ' ? 'selected' : ''}>ອື່ນໆ</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>ລາຍລະອຽດ</label>
+                    <input type="text" id="edit_expense_description" value="${expense.description || ''}">
+                </div>
+                <div class="form-group">
+                    <label>ວັນທີ</label>
+                    <input type="date" id="edit_expense_date" value="${expense.expense_date}">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="this.closest('.modal').remove()">ຍົກເລີກ</button>
+                <button class="btn btn-primary" onclick="updateExpense('${expenseId}')"><i class="fas fa-save"></i> ບັນທຶກ</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+}
 
-        const rows = orders.map(o => ({
-            'ເລກຄຳສັ່ງ':    o.order_number || '-',
-            'ໂຕະ':           `ໂຕະ ${o.restaurant_tables?.table_number || '-'}`,
-            'ລູກຄ້າ':        o.customer_name || '-',
-            'ວັນທີຊຳລະ':    formatDateTime(o.paid_at || o.created_at),
-            'ຍອດລວມ (₭)':   o.total_amount || 0
-        }));
+async function updateExpense(expenseId) {
+    const amount = parseFloat(document.getElementById('edit_expense_amount')?.value);
+    const category = document.getElementById('edit_expense_category')?.value;
+    const description = document.getElementById('edit_expense_description')?.value.trim();
+    const expense_date = document.getElementById('edit_expense_date')?.value;
 
-        const ws = XLSX.utils.json_to_sheet(rows);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Financial_Report');
-        XLSX.writeFile(wb, `report_${new Date().toISOString().slice(0,10)}.xlsx`);
-        showToast('ສຳເລັດ', 'ສົ່ງອອກ Excel ສຳເລັດ');
-    } catch (err) { showToast('ຜິດພາດ', err.message, 'error'); }
+    if (!amount || amount <= 0) {
+        showToast('ແຈ້ງເຕືອນ', 'ກະລຸນາປ້ອນຈຳນວນເງິນທີ່ຖືກຕ້ອງ', 'warning');
+        return;
+    }
+
+    const supabase = initSupabase();
+    showLoading();
+    try {
+        const { error } = await supabase
+            .from('expenses')
+            .update({ amount, category, description, expense_date })
+            .eq('id', expenseId);
+        if (error) throw error;
+        await writeAuditLog('EDIT_EXPENSE', 'expenses', expenseId, null, { amount, category, description, expense_date });
+        document.querySelector('.modal.show')?.remove();
+        showToast('ສຳເລັດ', 'ແກ້ໄຂລາຍຈ່າຍສຳເລັດ');
+        loadReports(currentReportsPage);
+    } catch (err) {
+        showToast('ຜິດພາດ', err.message, 'error');
+    }
     hideLoading();
 }
 
+async function deleteExpense(expenseId) {
+    if (!confirm('ທ່ານຕ້ອງການລຶບລາຍຈ່າຍນີ້ແທ້ບໍ?')) return;
+    const supabase = initSupabase();
+    showLoading();
+    try {
+        const { error } = await supabase.from('expenses').delete().eq('id', expenseId);
+        if (error) throw error;
+        await writeAuditLog('DELETE_EXPENSE', 'expenses', expenseId, null, null);
+        showToast('ສຳເລັດ', 'ລຶບລາຍຈ່າຍສຳເລັດ');
+        loadReports(currentReportsPage);
+    } catch (err) {
+        showToast('ຜິດພາດ', err.message, 'error');
+    }
+    hideLoading();
+}
+		async function exportFinancialReport() {
+    showLoading();
+    try {
+        const supabase = initSupabase();
+
+        // Determine date range (same as above)
+        let startDate = null, endDate = null;
+        if (currentOrderDateRangeType === 'last7') {
+            const d = new Date();
+            d.setDate(d.getDate() - 7);
+            startDate = d.toISOString().split('T')[0];
+            endDate = new Date().toISOString().split('T')[0];
+        } else if (currentOrderDateRangeType === 'this_month') {
+            const now = new Date();
+            startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+            endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+        } else if (currentOrderDateRangeType === 'last_month') {
+            const now = new Date();
+            startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0];
+            endDate = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split('T')[0];
+        } else if (currentOrderDateFilter) {
+            startDate = currentOrderDateFilter;
+            endDate = currentOrderDateFilter;
+        }
+
+        // Revenue data
+        let revenueQuery = supabase.from('orders').select('order_number, restaurant_tables(table_number), customer_name, paid_at, total_amount').eq('status', 'paid');
+        if (startDate) revenueQuery = revenueQuery.gte('paid_at', startDate);
+        if (endDate) revenueQuery = revenueQuery.lte('paid_at', endDate);
+        const { data: orders } = await revenueQuery.order('paid_at', { ascending: false });
+
+        // Expenses data
+        let expenseQuery = supabase.from('expenses').select('expense_date, category, description, amount');
+        if (startDate) expenseQuery = expenseQuery.gte('expense_date', startDate);
+        if (endDate) expenseQuery = expenseQuery.lte('expense_date', endDate);
+        const { data: expenses } = await expenseQuery.order('expense_date', { ascending: false });
+
+        const revenueRows = (orders || []).map(o => ({
+            'ເລກຄຳສັ່ງ': o.order_number,
+            'ໂຕະ': o.restaurant_tables?.table_number || '-',
+            'ລູກຄ້າ': o.customer_name || '-',
+            'ວັນທີຊຳລະ': formatDateTime(o.paid_at),
+            'ຍອດລວມ (₭)': o.total_amount
+        }));
+        const expenseRows = (expenses || []).map(e => ({
+            'ວັນທີ': formatDateTime(e.expense_date),
+            'ໝວດໝູ່': e.category,
+            'ລາຍລະອຽດ': e.description || '-',
+            'ຈຳນວນເງິນ (₭)': e.amount
+        }));
+
+        const wb = XLSX.utils.book_new();
+        if (revenueRows.length) {
+            const wsRev = XLSX.utils.json_to_sheet(revenueRows);
+            XLSX.utils.book_append_sheet(wb, wsRev, 'Revenue');
+        }
+        if (expenseRows.length) {
+            const wsExp = XLSX.utils.json_to_sheet(expenseRows);
+            XLSX.utils.book_append_sheet(wb, wsExp, 'Expenses');
+        }
+        if (revenueRows.length === 0 && expenseRows.length === 0) {
+            showToast('ແຈ້ງເຕືອນ', 'ບໍ່ມີຂໍ້ມູນສຳລັບສົ່ງອອກ', 'warning');
+            hideLoading();
+            return;
+        }
+        XLSX.writeFile(wb, `financial_report_${new Date().toISOString().slice(0,10)}.xlsx`);
+        showToast('ສຳເລັດ', 'ສົ່ງອອກ Excel ສຳເລັດ');
+    } catch (err) {
+        showToast('ຜິດພາດ', err.message, 'error');
+    }
+    hideLoading();
+}
 // ============================================
 // STAFF MANAGEMENT  (BUG FIX: missing > on </td)
 // ============================================
@@ -4387,6 +4657,11 @@ window.restockIngredient       = restockIngredient;
 window.editIngredient = editIngredient;
 window.updateIngredient = updateIngredient;
 window.deleteIngredient = deleteIngredient;
+window.showAddExpenseModal = showAddExpenseModal;
+window.saveExpense = saveExpense;
+window.editExpense = editExpense;
+window.updateExpense = updateExpense;
+window.deleteExpense = deleteExpense;
 
     </script>
 </body>
