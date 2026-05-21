@@ -2054,12 +2054,22 @@ window.changeOrderTable      = changeOrderTable;
             endDate = currentOrderDateFilter;
         }
 
-        // --- Revenue query (paid orders) ---
-        let revenueQuery = supabase.from('orders').select('total_amount, paid_at').eq('status', 'paid');
-        if (startDate) revenueQuery = revenueQuery.gte('paid_at', startDate);
-        if (endDate) revenueQuery = revenueQuery.lte('paid_at', endDate);
-        const { data: revenueData } = await revenueQuery;
-        const totalRevenue = (revenueData || []).reduce((s, o) => s + (o.total_amount || 0), 0);
+		// --- Revenue query (fixed: includes all needed fields) ---
+		let revenueQuery = supabase
+   		 .from('orders')
+   		 .select(`
+        id,
+        order_number,
+        customer_name,
+        paid_at,
+        total_amount,
+        restaurant_tables ( table_number )
+	    `)
+  	  .eq('status', 'paid');
+		if (startDate) revenueQuery = revenueQuery.gte('paid_at', startDate);
+		if (endDate) revenueQuery = revenueQuery.lte('paid_at', endDate);
+		const { data: revenueData } = await revenueQuery.order('paid_at', { ascending: false });
+		const totalRevenue = (revenueData || []).reduce((s, o) => s + (o.total_amount || 0), 0);
 
         // --- Expenses query ---
         let expenseQuery = supabase.from('expenses').select('*');
