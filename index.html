@@ -2024,7 +2024,6 @@ window.cancelOrderItem       = cancelOrderItem;
 window.cancelWholeOrder      = cancelWholeOrder;
 window.changeOrderTable      = changeOrderTable;
 
-    // ===== PART 5 =====
 // ============================================
 // REPORTS WITH PAGINATION
 // ============================================
@@ -2054,24 +2053,39 @@ window.changeOrderTable      = changeOrderTable;
             endDate = currentOrderDateFilter;
         }
 
-		// --- Revenue query (fixed: includes all needed fields) ---
-		let revenueQuery = supabase
-   		 .from('orders')
-   		 .select(`
-        id,
-        order_number,
-        customer_name,
-        paid_at,
-        total_amount,
-        restaurant_tables ( table_number )
-	    `)
-  	  .eq('status', 'paid');
-		if (startDate) revenueQuery = revenueQuery.gte('paid_at', startDate);
-		if (endDate) revenueQuery = revenueQuery.lte('paid_at', endDate);
-		const { data: revenueData } = await revenueQuery.order('paid_at', { ascending: false });
-		const totalRevenue = (revenueData || []).reduce((s, o) => s + (o.total_amount || 0), 0);
+        // --- 1. Get total count of paid orders for pagination ---
+        let countQuery = supabase.from('orders').select('id', { count: 'exact', head: true }).eq('status', 'paid');
+        if (startDate) countQuery = countQuery.gte('paid_at', startDate);
+        if (endDate) countQuery = countQuery.lte('paid_at', endDate);
+        const { count: totalPaidOrders, error: countError } = await countQuery;
+        if (countError) throw countError;
+        totalReports = totalPaidOrders || 0;   // update global totalReports for pagination
 
-        // --- Expenses query ---
+        // --- 2. Fetch paginated revenue data ---
+        const from = (page - 1) * reportsPerPage;
+        const to = from + reportsPerPage - 1;
+
+        let revenueQuery = supabase
+            .from('orders')
+            .select(`
+                id,
+                order_number,
+                customer_name,
+                paid_at,
+                total_amount,
+                restaurant_tables ( table_number )
+            `)
+            .eq('status', 'paid')
+            .order('paid_at', { ascending: false })
+            .range(from, to);
+
+        if (startDate) revenueQuery = revenueQuery.gte('paid_at', startDate);
+        if (endDate) revenueQuery = revenueQuery.lte('paid_at', endDate);
+
+        const { data: revenueData } = await revenueQuery;
+        const totalRevenue = (revenueData || []).reduce((s, o) => s + (o.total_amount || 0), 0);
+
+        // --- 3. Expenses query (no pagination, simple) ---
         let expenseQuery = supabase.from('expenses').select('*');
         if (startDate) expenseQuery = expenseQuery.gte('expense_date', startDate);
         if (endDate) expenseQuery = expenseQuery.lte('expense_date', endDate);
@@ -2080,10 +2094,10 @@ window.changeOrderTable      = changeOrderTable;
         const netProfit = totalRevenue - totalExpenses;
         const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue * 100).toFixed(2) : 0;
 
-        // --- Pagination for expenses (optional, keep simple for now) ---
-        // Reuse existing pagination from reports? We'll just show all expenses in period.
+        // --- Pagination controls ---
+        const totalPages = Math.max(1, Math.ceil(totalReports / reportsPerPage));
 
-        // Build HTML (keep existing stats cards, add profit card)
+        // Build HTML (same as before, but with pagination added)
         content.innerHTML = `
             <div class="data-table-container">
                 <div class="table-header">
@@ -2106,7 +2120,7 @@ window.changeOrderTable      = changeOrderTable;
                     </div>
                 </div>
 
-                <!-- Stats row with 4 cards -->
+                <!-- Stats row -->
                 <div class="dashboard-stats" style="padding:20px;margin:0;border-bottom:1px solid var(--gray-200);">
                     <div class="stat-card" style="border-left-color:var(--success);">
                         <div class="stat-header"><span class="stat-label">ລາຍຮັບທັງໝົດ</span><div class="stat-icon" style="background:var(--success-light);color:var(--success);"><i class="fas fa-chart-line"></i></div></div>
@@ -2126,7 +2140,7 @@ window.changeOrderTable      = changeOrderTable;
                     </div>
                 </div>
 
-                <!-- Revenue table (existing) -->
+                <!-- Revenue table with pagination -->
                 <div style="overflow-x:auto; margin-top:20px;">
                     <h4 style="padding:12px 16px; margin:0;"><i class="fas fa-money-bill-wave"></i> ລາຍຮັບ</h4>
                     <table class="data-table" style="width:100%;">
@@ -2148,7 +2162,18 @@ window.changeOrderTable      = changeOrderTable;
                     </table>
                 </div>
 
-                <!-- Expenses table -->
+                <!-- Pagination controls -->
+                <div class="pagination">
+                    <button class="btn btn-outline btn-sm" onclick="changeReportsPage(${page-1})" ${page<=1?'disabled':''}>
+                        <i class="fas fa-chevron-left"></i> ກ່ອນໜ້າ
+                    </button>
+                    <span style="padding:6px 12px;font-size:0.875rem;">ໜ້າ ${page} / ${totalPages} &nbsp;(ທັງໝົດ ${totalReports} ລາຍການ)</span>
+                    <button class="btn btn-outline btn-sm" onclick="changeReportsPage(${page+1})" ${page>=totalPages?'disabled':''}>
+                        ຕໍ່ໄປ <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+
+                <!-- Expenses table (no pagination) -->
                 <div style="overflow-x:auto; margin-top:30px;">
                     <h4 style="padding:12px 16px; margin:0;"><i class="fas fa-receipt"></i> ລາຍຈ່າຍ</h4>
                     <table class="data-table" style="width:100%;">
