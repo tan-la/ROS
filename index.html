@@ -375,6 +375,9 @@ let totalOrders        = 0;
 let currentReportsPage = 1;
 let reportsPerPage     = 20;
 let totalReports       = 0;
+let currentExpensesPage = 1;
+let expensesPerPage     = 10;
+let totalExpensesCount  = 0;
         
 // Filter state for orders
 let currentOrderStatusFilter = 'all';
@@ -2033,7 +2036,7 @@ window.changeOrderTable      = changeOrderTable;
     try {
         const supabase = initSupabase();
 
-        // --- Determine date range based on current filters (same as orders) ---
+        // --- Determine date range based on current filters ---
         let startDate = null, endDate = null;
         if (currentOrderDateRangeType === 'last7') {
             const d = new Date();
@@ -2053,62 +2056,54 @@ window.changeOrderTable      = changeOrderTable;
             endDate = currentOrderDateFilter;
         }
 
-        // --- 1. Get total count of paid orders for pagination ---
-        let countQuery = supabase.from('orders').select('id', { count: 'exact', head: true }).eq('status', 'paid');
-        if (startDate) countQuery = countQuery.gte('paid_at', startDate);
-        if (endDate) countQuery = countQuery.lte('paid_at', endDate);
-        const { count: totalPaidOrders, error: countError } = await countQuery;
-        if (countError) throw countError;
-        totalReports = totalPaidOrders || 0;   // update global totalReports for pagination
+        // ---------- REVENUE (paid orders) with pagination ----------
+        let revenueCountQuery = supabase.from('orders').select('id', { count: 'exact', head: true }).eq('status', 'paid');
+        if (startDate) revenueCountQuery = revenueCountQuery.gte('paid_at', startDate);
+        if (endDate) revenueCountQuery = revenueCountQuery.lte('paid_at', endDate);
+        const { count: totalRevenueRows } = await revenueCountQuery;
+        totalReports = totalRevenueRows || 0;
 
-        // --- 2. Fetch paginated revenue data ---
-        const from = (page - 1) * reportsPerPage;
-        const to = from + reportsPerPage - 1;
-
+        const revenueStart = (page - 1) * reportsPerPage;
+        const revenueEnd = revenueStart + reportsPerPage - 1;
         let revenueQuery = supabase
             .from('orders')
-            .select(`
-                id,
-                order_number,
-                customer_name,
-                paid_at,
-                total_amount,
-                restaurant_tables ( table_number )
-            `)
+            .select(`id, order_number, customer_name, paid_at, total_amount, restaurant_tables ( table_number )`)
             .eq('status', 'paid')
             .order('paid_at', { ascending: false })
-            .range(from, to);
-
+            .range(revenueStart, revenueEnd);
         if (startDate) revenueQuery = revenueQuery.gte('paid_at', startDate);
         if (endDate) revenueQuery = revenueQuery.lte('paid_at', endDate);
-
         const { data: revenueData } = await revenueQuery;
         const totalRevenue = (revenueData || []).reduce((s, o) => s + (o.total_amount || 0), 0);
+        const revenueTotalPages = Math.max(1, Math.ceil(totalReports / reportsPerPage));
 
-        // --- 3. Expenses query (no pagination, simple) ---
+        // ---------- EXPENSES with its own pagination ----------
+        let expenseCountQuery = supabase.from('expenses').select('id', { count: 'exact', head: true });
+        if (startDate) expenseCountQuery = expenseCountQuery.gte('expense_date', startDate);
+        if (endDate) expenseCountQuery = expenseCountQuery.lte('expense_date', endDate);
+        const { count: totalExpensesAll } = await expenseCountQuery;
+        totalExpensesCount = totalExpensesAll || 0;
+
+        const expenseStart = (currentExpensesPage - 1) * expensesPerPage;
+        const expenseEnd = expenseStart + expensesPerPage - 1;
         let expenseQuery = supabase.from('expenses').select('*');
         if (startDate) expenseQuery = expenseQuery.gte('expense_date', startDate);
         if (endDate) expenseQuery = expenseQuery.lte('expense_date', endDate);
-        const { data: expenses } = await expenseQuery.order('expense_date', { ascending: false });
+        const { data: expenses } = await expenseQuery
+            .order('expense_date', { ascending: false })
+            .range(expenseStart, expenseEnd);
         const totalExpenses = (expenses || []).reduce((s, e) => s + (e.amount || 0), 0);
+        const expenseTotalPages = Math.max(1, Math.ceil(totalExpensesCount / expensesPerPage));
+
         const netProfit = totalRevenue - totalExpenses;
         const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue * 100).toFixed(2) : 0;
 
-        // --- Pagination controls ---
-        const totalPages = Math.max(1, Math.ceil(totalReports / reportsPerPage));
-
-        // Build HTML (same as before, but with pagination added)
+        // Build HTML
         content.innerHTML = `
             <div class="data-table-container">
                 <div class="table-header">
                     <h3 class="table-title"><i class="fas fa-chart-line"></i> ລາຍງານການເງິນ</h3>
                     <div class="table-actions">
-                        <select id="reports-per-page" onchange="changeReportsPerPage()" style="padding:6px 12px;border:1px solid var(--gray-300);border-radius:8px;font-family:inherit;">
-                            <option value="10"  ${reportsPerPage===10  ?'selected':''}>10 ລາຍການ</option>
-                            <option value="20"  ${reportsPerPage===20  ?'selected':''}>20 ລາຍການ</option>
-                            <option value="50"  ${reportsPerPage===50  ?'selected':''}>50 ລາຍການ</option>
-                            <option value="100" ${reportsPerPage===100 ?'selected':''}>100 ລາຍການ</option>
-                        </select>
                         <button class="btn btn-outline btn-sm" onclick="exportFinancialReport()">
                             <i class="fas fa-download"></i> ສົ່ງອອກ Excel
                         </button>
@@ -2142,7 +2137,17 @@ window.changeOrderTable      = changeOrderTable;
 
                 <!-- Revenue table with pagination -->
                 <div style="overflow-x:auto; margin-top:20px;">
-                    <h4 style="padding:12px 16px; margin:0;"><i class="fas fa-money-bill-wave"></i> ລາຍຮັບ</h4>
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:0 16px 8px 16px;">
+                        <h4 style="margin:0;"><i class="fas fa-money-bill-wave"></i> ລາຍຮັບ</h4>
+                        <div>
+                            <select id="reports-per-page" onchange="changeReportsPerPage()" style="padding:4px 8px;border:1px solid var(--gray-300);border-radius:6px;font-family:inherit;">
+                                <option value="10" ${reportsPerPage===10 ?'selected':''}>10 ລາຍການ</option>
+                                <option value="20" ${reportsPerPage===20 ?'selected':''}>20 ລາຍການ</option>
+                                <option value="50" ${reportsPerPage===50 ?'selected':''}>50 ລາຍການ</option>
+                                <option value="100" ${reportsPerPage===100 ?'selected':''}>100 ລາຍການ</option>
+                            </select>
+                        </div>
+                    </div>
                     <table class="data-table" style="width:100%;">
                         <thead><tr><th>ເລກຄຳສັ່ງ</th><th>ໂຕະ</th><th>ລູກຄ້າ</th><th>ວັນທີຊຳລະ</th><th>ຍອດລວມ</th><th>ຈັດການ</th></tr></thead>
                         <tbody>
@@ -2160,27 +2165,35 @@ window.changeOrderTable      = changeOrderTable;
                                 `).join('')}
                         </tbody>
                     </table>
+                    <div class="pagination">
+                        <button class="btn btn-outline btn-sm" onclick="changeReportsPage(${page-1})" ${page<=1?'disabled':''}>
+                            <i class="fas fa-chevron-left"></i> ກ່ອນໜ້າ
+                        </button>
+                        <span style="padding:6px 12px;font-size:0.875rem;">ໜ້າ ${page} / ${revenueTotalPages} &nbsp;(ທັງໝົດ ${totalReports} ລາຍການ)</span>
+                        <button class="btn btn-outline btn-sm" onclick="changeReportsPage(${page+1})" ${page>=revenueTotalPages?'disabled':''}>
+                            ຕໍ່ໄປ <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
                 </div>
 
-                <!-- Pagination controls -->
-                <div class="pagination">
-                    <button class="btn btn-outline btn-sm" onclick="changeReportsPage(${page-1})" ${page<=1?'disabled':''}>
-                        <i class="fas fa-chevron-left"></i> ກ່ອນໜ້າ
-                    </button>
-                    <span style="padding:6px 12px;font-size:0.875rem;">ໜ້າ ${page} / ${totalPages} &nbsp;(ທັງໝົດ ${totalReports} ລາຍການ)</span>
-                    <button class="btn btn-outline btn-sm" onclick="changeReportsPage(${page+1})" ${page>=totalPages?'disabled':''}>
-                        ຕໍ່ໄປ <i class="fas fa-chevron-right"></i>
-                    </button>
-                </div>
-
-                <!-- Expenses table (no pagination) -->
+                <!-- Expenses table with its own pagination -->
                 <div style="overflow-x:auto; margin-top:30px;">
-                    <h4 style="padding:12px 16px; margin:0;"><i class="fas fa-receipt"></i> ລາຍຈ່າຍ</h4>
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:0 16px 8px 16px;">
+                        <h4 style="margin:0;"><i class="fas fa-receipt"></i> ລາຍຈ່າຍ</h4>
+                        <div>
+                            <select id="expenses-per-page" onchange="changeExpensesPerPage()" style="padding:4px 8px;border:1px solid var(--gray-300);border-radius:6px;font-family:inherit;">
+                                <option value="10" ${expensesPerPage===10 ?'selected':''}>10 ລາຍການ</option>
+                                <option value="20" ${expensesPerPage===20 ?'selected':''}>20 ລາຍການ</option>
+                                <option value="50" ${expensesPerPage===50 ?'selected':''}>50 ລາຍການ</option>
+                                <option value="100" ${expensesPerPage===100 ?'selected':''}>100 ລາຍການ</option>
+                            </select>
+                        </div>
+                    </div>
                     <table class="data-table" style="width:100%;">
                         <thead><tr><th>ວັນທີ</th><th>ໝວດໝູ່</th><th>ລາຍລະອຽດ</th><th>ຈຳນວນເງິນ</th>${currentUser.role === 'admin' ? '<th>ຈັດການ</th>' : ''}</tr></thead>
                         <tbody>
                             ${!expenses || expenses.length === 0
-                                ? `<tr><td colspan="${currentUser.role === 'admin' ? 5 : 4}" style="text-align:center;padding:40px;color:var(--gray-400);">ຍັງບໍ່ມີລາຍຈ່າຍ</td></tr>`
+                                ? `<td><td colspan="${currentUser.role === 'admin' ? 5 : 4}" style="text-align:center;padding:40px;color:var(--gray-400);">ຍັງບໍ່ມີລາຍຈ່າຍ</td></tr>`
                                 : expenses.map(e => `
                                     <tr>
                                         <td>${formatDateTime(e.expense_date)}</td>
@@ -2197,6 +2210,15 @@ window.changeOrderTable      = changeOrderTable;
                                 `).join('')}
                         </tbody>
                     </table>
+                    <div class="pagination">
+                        <button class="btn btn-outline btn-sm" onclick="changeExpensesPage(${currentExpensesPage-1})" ${currentExpensesPage<=1?'disabled':''}>
+                            <i class="fas fa-chevron-left"></i> ກ່ອນໜ້າ
+                        </button>
+                        <span style="padding:6px 12px;font-size:0.875rem;">ໜ້າ ${currentExpensesPage} / ${expenseTotalPages} &nbsp;(ທັງໝົດ ${totalExpensesCount} ລາຍການ)</span>
+                        <button class="btn btn-outline btn-sm" onclick="changeExpensesPage(${currentExpensesPage+1})" ${currentExpensesPage>=expenseTotalPages?'disabled':''}>
+                            ຕໍ່ໄປ <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
                 </div>
             </div>
         `;
@@ -2216,6 +2238,21 @@ function changeReportsPage(newPage) {
 function changeReportsPerPage() {
     const el = document.getElementById('reports-per-page');
     if (el) { reportsPerPage = parseInt(el.value); currentReportsPage = 1; loadReports(1); }
+}
+		function changeExpensesPage(newPage) {
+    const totalPages = Math.ceil(totalExpensesCount / expensesPerPage);
+    if (newPage < 1 || newPage > totalPages) return;
+    currentExpensesPage = newPage;
+    loadReports(currentReportsPage); // refresh the whole page (revenue page stays same)
+}
+
+function changeExpensesPerPage() {
+    const el = document.getElementById('expenses-per-page');
+    if (el) {
+        expensesPerPage = parseInt(el.value);
+        currentExpensesPage = 1;
+        loadReports(currentReportsPage);
+    }
 }
 
 		async function showAddExpenseModal() {
